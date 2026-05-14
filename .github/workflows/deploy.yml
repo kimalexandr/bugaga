@@ -1,3 +1,8 @@
+# Нужны секреты репозитория: Settings → Secrets and variables → Actions
+#   VPS_HOST    — IP или домен VPS (без ssh:// и без порта)
+#   VPS_USER    — пользователь SSH
+#   VPS_SSH_KEY — полный текст приватного ключа (BEGIN … END)
+# Опционально: VPS_PORT — только если SSH не на 22
 name: Deploy to VPS
 on:
   push:
