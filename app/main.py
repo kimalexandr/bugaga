@@ -1,12 +1,24 @@
 import logging
 import tempfile
 from pathlib import Path
+
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
+
 from app.processor import adjust_bleed_pdf
 
 logging.basicConfig(level=logging.INFO)
 app = FastAPI(title="PDF Bleed Adjuster", version="1.0")
+
+_STATIC = Path(__file__).resolve().parent / "static"
+
+
+@app.get("/")
+async def index_page():
+    index = _STATIC / "index.html"
+    if not index.is_file():
+        raise HTTPException(404, "index.html не найден")
+    return FileResponse(index, media_type="text/html; charset=utf-8")
 
 MAX_SIZE = 50 * 1024 * 1024  # 50 MB
 

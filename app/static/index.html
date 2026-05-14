@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PDF — вылеты</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --card: #1a2332;
+      --text: #e7ecf3;
+      --muted: #8b9cb3;
+      --accent: #3d8bfd;
+      --accent-hover: #5ba3ff;
+      --danger: #f87171;
+      --radius: 12px;
+      --font: system-ui, "Segoe UI", Roboto, Ubuntu, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font);
+      background: radial-gradient(ellipse 120% 80% at 50% -20%, #1e3a5f 0%, var(--bg) 55%);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      width: 100%;
+      max-width: 420px;
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 28px 28px 24px;
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 1.35rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+    .sub {
+      margin: 0 0 22px;
+      font-size: 0.875rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    label {
+      display: block;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .field { margin-bottom: 18px; }
+    input[type="file"] {
+      width: 100%;
+      font-size: 0.85rem;
+      color: var(--text);
+    }
+    input[type="number"] {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(0, 0, 0, 0.25);
+      color: var(--text);
+      font-size: 1rem;
+    }
+    input[type="number"]:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    button {
+      width: 100%;
+      margin-top: 8px;
+      padding: 12px 16px;
+      font-size: 1rem;
+      font-weight: 600;
+      color: #fff;
+      background: var(--accent);
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    button:hover:not(:disabled) { background: var(--accent-hover); }
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+    .msg {
+      margin-top: 14px;
+      font-size: 0.85rem;
+      min-height: 1.2em;
+      line-height: 1.4;
+    }
+    .msg.err { color: var(--danger); }
+    .msg.ok { color: #6ee7b7; }
+    footer {
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Вылеты PDF</h1>
+    <p class="sub">Загрузите макет PDF, задайте вылет в мм — получите файл с обновлёнными боксами (Bleed/Media/Crop).</p>
+
+    <form id="f">
+      <div class="field">
+        <label for="pdf">Макет (PDF)</label>
+        <input id="pdf" name="file" type="file" accept="application/pdf,.pdf" required />
+      </div>
+      <div class="field">
+        <label for="bleed">Вылет, мм</label>
+        <input id="bleed" name="bleed_mm" type="number" min="0" max="20" step="0.1" value="3" />
+      </div>
+      <button type="submit" id="btn">Скачать с вылетами</button>
+    </form>
+    <div class="msg" id="msg" aria-live="polite"></div>
+    <footer>
+      API: <a href="/docs">/docs</a> · <a href="/health">/health</a>
+    </footer>
+  </div>
+  <script>
+    const form = document.getElementById("f");
+    const btn = document.getElementById("btn");
+    const msg = document.getElementById("msg");
+
+    function parseFilename(cd) {
+      if (!cd) return "maket_bleed.pdf";
+      const star = cd.match(/filename\*=UTF-8''([^;\s]+)/i);
+      if (star) try { return decodeURIComponent(star[1]); } catch (_) {}
+      const m = cd.match(/filename="?([^";\n]+)"?/i);
+      return m ? m[1].trim() : "maket_bleed.pdf";
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      msg.textContent = "";
+      msg.className = "msg";
+
+      const file = document.getElementById("pdf").files[0];
+      if (!file) {
+        msg.className = "msg err";
+        msg.textContent = "Выберите PDF.";
+        return;
+      }
+      if (file.type && file.type !== "application/pdf") {
+        msg.className = "msg err";
+        msg.textContent = "Нужен файл PDF.";
+        return;
+      }
+
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("bleed_mm", String(document.getElementById("bleed").value || "3"));
+
+      btn.disabled = true;
+      btn.textContent = "Обработка…";
+
+      try {
+        const res = await fetch("/adjust-bleed", { method: "POST", body: fd });
+        const cd = res.headers.get("Content-Disposition") || "";
+        const name = parseFilename(cd);
+
+        if (!res.ok) {
+          const t = await res.text();
+          throw new Error(t || res.statusText);
+        }
+
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = name;
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+
+        msg.className = "msg ok";
+        msg.textContent = "Готово. Если скачивание не началось, проверьте блокировку всплывающих окон.";
+      } catch (err) {
+        msg.className = "msg err";
+        msg.textContent = err.message || String(err);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Скачать с вылетами";
+      }
+    });
+  </script>
+</body>
+</html>
