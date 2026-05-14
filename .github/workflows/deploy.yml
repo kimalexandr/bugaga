@@ -31,17 +31,17 @@ jobs:
             fi
             cd "$DEPLOY_DIR"
             git pull origin main
-            if ! command -v docker >/dev/null 2>&1; then
-              echo "ERROR: docker не найден в PATH. Установите Docker Engine: https://docs.docker.com/engine/install/"
-              echo "На сервере выполните: curl -fsSL https://get.docker.com | sh  (нужен root)"
-              exit 127
-            fi
-            if docker compose version >/dev/null 2>&1; then
-              docker compose up -d --build
-            elif command -v docker-compose >/dev/null 2>&1; then
-              docker-compose up -d --build
+            if command -v docker >/dev/null 2>&1; then
+              if docker compose version >/dev/null 2>&1; then
+                docker compose up -d --build
+              elif command -v docker-compose >/dev/null 2>&1; then
+                docker-compose up -d --build
+              else
+                echo "ERROR: нет «docker compose» и нет docker-compose. Установите Compose или используйте путь без Docker."
+                exit 127
+              fi
+              docker system prune -f
             else
-              echo "ERROR: нет «docker compose» (v2) и нет docker-compose (v1). Установите Docker Compose plugin."
-              exit 127
+              echo "WARN: docker не найден — деплой через venv + uvicorn (scripts/deploy-no-docker.sh)"
+              bash scripts/deploy-no-docker.sh
             fi
-            docker system prune -f
