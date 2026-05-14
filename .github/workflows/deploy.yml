@@ -23,6 +23,8 @@ jobs:
           port: ${{ secrets.VPS_PORT || 22 }}
           script: |
             set -e
+            # Неинтерактивный SSH часто даёт урезанный PATH — docker может быть в /usr/local/bin
+            export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH}"
             DEPLOY_DIR="${HOME}/pdf-bleed-service"
             if [ ! -d "$DEPLOY_DIR/.git" ]; then
               git clone https://github.com/kimalexandr/bugaga.git "$DEPLOY_DIR"
@@ -30,8 +32,16 @@ jobs:
             cd "$DEPLOY_DIR"
             git pull origin main
             if ! command -v docker >/dev/null 2>&1; then
-              echo "ERROR: docker не найден. Установите Docker Engine на VPS и перезапустите job."
+              echo "ERROR: docker не найден в PATH. Установите Docker Engine: https://docs.docker.com/engine/install/"
+              echo "На сервере выполните: curl -fsSL https://get.docker.com | sh  (нужен root)"
               exit 127
             fi
-            docker compose up -d --build
+            if docker compose version >/dev/null 2>&1; then
+              docker compose up -d --build
+            elif command -v docker-compose >/dev/null 2>&1; then
+              docker-compose up -d --build
+            else
+              echo "ERROR: нет «docker compose» (v2) и нет docker-compose (v1). Установите Docker Compose plugin."
+              exit 127
+            fi
             docker system prune -f
