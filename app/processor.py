@@ -16,13 +16,14 @@ def adjust_bleed_pdf(input_path: str, output_path: str, bleed_mm: float = 3.0) -
 
             llx, lly, urx, ury = [float(v) for v in trim]
 
-            # Новые границы с вылетом
+            # Новые границы с вылетом (списки pikepdf сам приведёт к Array)
             new_bounds = [llx - bleed_pt, lly - bleed_pt, urx + bleed_pt, ury + bleed_pt]
-            
-            page.MediaBox = pikepdf.Array(pdf, new_bounds)
-            page.BleedBox = pikepdf.Array(pdf, new_bounds)
-            page.TrimBox  = pikepdf.Array(pdf, [llx, lly, urx, ury])
-            page.CropBox  = pikepdf.Array(pdf, new_bounds)
+            trim_bounds = [llx, lly, urx, ury]
+
+            page.MediaBox = new_bounds
+            page.BleedBox = new_bounds
+            page.TrimBox = trim_bounds
+            page.CropBox = new_bounds
 
         pdf.save(output_path, fix_metadata_version=True)
         logging.info(f"✅ Обработано {len(pdf.pages)} стр. → {output_path}")
