@@ -22,7 +22,16 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           script: |
-            cd ~/pdf-bleed-service
+            set -e
+            DEPLOY_DIR="${HOME}/pdf-bleed-service"
+            if [ ! -d "$DEPLOY_DIR/.git" ]; then
+              git clone https://github.com/kimalexandr/bugaga.git "$DEPLOY_DIR"
+            fi
+            cd "$DEPLOY_DIR"
             git pull origin main
+            if ! command -v docker >/dev/null 2>&1; then
+              echo "ERROR: docker не найден. Установите Docker Engine на VPS и перезапустите job."
+              exit 127
+            fi
             docker compose up -d --build
-            docker system prune -af --volumes
+            docker system prune -f
