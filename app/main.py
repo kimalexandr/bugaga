@@ -33,6 +33,8 @@ async def adjust_bleed(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     bleed_mm: float = Form(3.0),
+    add_crop_marks: int = Form(0),
+    crop_mark_len_mm: float = Form(3.0),
 ):
     if file.content_type != "application/pdf":
         raise HTTPException(400, "Разрешены только PDF")
@@ -49,7 +51,13 @@ async def adjust_bleed(
             tmp_in = f_in.name
 
         tmp_out = tmp_in.replace(".pdf", "_bleed.pdf")
-        adjust_bleed_pdf(tmp_in, tmp_out, bleed_mm)
+        adjust_bleed_pdf(
+            tmp_in,
+            tmp_out,
+            bleed_mm,
+            add_crop_marks=bool(add_crop_marks),
+            crop_mark_len_mm=crop_mark_len_mm,
+        )
         ok = True
         background_tasks.add_task(_unlink_safe, tmp_out)
 

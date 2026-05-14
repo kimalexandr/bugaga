@@ -74,6 +74,17 @@
       outline: none;
       border-color: var(--accent);
     }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+    .row input[type="checkbox"] {
+      width: auto;
+      margin: 0;
+    }
+    .row label { margin: 0; cursor: pointer; }
     button {
       width: 100%;
       margin-top: 8px;
@@ -114,7 +125,7 @@
 <body>
   <div class="card">
     <h1>Вылеты PDF</h1>
-    <p class="sub">Загрузите макет PDF, задайте вылет в мм — получите файл с обновлёнными боксами (Bleed/Media/Crop).</p>
+    <p class="sub">Задайте вылет в мм (боксы Bleed/Media/Crop). Опционально — нарисовать засечки по линии реза. Растягивание картинки/фона под обрез в макете не делается — для этого экспортируйте PDF с вылетом из InDesign/Illustrator или используйте PitStop/callas.</p>
 
     <form id="f">
       <div class="field">
@@ -124,6 +135,14 @@
       <div class="field">
         <label for="bleed">Вылет, мм</label>
         <input id="bleed" name="bleed_mm" type="number" min="0" max="20" step="0.1" value="3" />
+      </div>
+      <div class="field">
+        <div class="row">
+          <input id="marks" name="add_crop_marks" type="checkbox" value="1" checked />
+          <label for="marks">Засечки по углам линии реза</label>
+        </div>
+        <label for="marklen">Длина засечки, мм</label>
+        <input id="marklen" name="crop_mark_len_mm" type="number" min="1" max="15" step="0.5" value="3" />
       </div>
       <button type="submit" id="btn">Скачать с вылетами</button>
     </form>
@@ -165,6 +184,8 @@
       const fd = new FormData();
       fd.append("file", file);
       fd.append("bleed_mm", String(document.getElementById("bleed").value || "3"));
+      fd.append("add_crop_marks", document.getElementById("marks").checked ? "1" : "0");
+      fd.append("crop_mark_len_mm", String(document.getElementById("marklen").value || "3"));
 
       btn.disabled = true;
       btn.textContent = "Обработка…";
