@@ -1,6 +1,7 @@
 """Обёртка callas pdfToolbox CLI."""
 from __future__ import annotations
 
+import fnmatch
 import logging
 import os
 import subprocess
@@ -66,13 +67,21 @@ class CallasClient:
         profiles = self.home / "var" / "Profiles"
         if not profiles.is_dir():
             return None
+        all_kfpx = list(profiles.rglob("*.kfpx"))
         for pattern in patterns:
-            for path in profiles.rglob(pattern):
-                if path.suffix == ".kfpx":
+            # точное имя файла
+            for path in all_kfpx:
+                if path.name == pattern:
                     return path
-            for path in profiles.rglob(f"*{pattern}*"):
-                if path.suffix == ".kfpx":
+            # glob по имени (без rglob — иначе ** в *foo* ломает pathlib)
+            for path in all_kfpx:
+                if fnmatch.fnmatch(path.name, pattern):
                     return path
+            if not pattern.startswith("*"):
+                wrapped = f"*{pattern}*"
+                for path in all_kfpx:
+                    if fnmatch.fnmatch(path.name, wrapped):
+                        return path
         return None
 
     def quick_info(self, pdf: Path) -> str:
