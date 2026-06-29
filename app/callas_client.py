@@ -121,19 +121,58 @@ class CallasClient:
         width: int = 400,
         height: int = 220,
     ) -> None:
-        code, out, err = self._run(
-            [
-                "--saveasimg",
-                "--imgformat=PNG",
-                f"--resolution={width}x{height}",
-                f"--pagebox={pagebox}",
-                f"-p={page}",
-                "-o=" + str(output),
-                str(pdf),
-            ]
-        )
-        if code >= 100 or not output.is_file():
-            raise CallasError(err or out or f"saveasimg exit {code}")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        before = {p for p in output.parent.glob("*.png")}
+        base = output.with_suffix("")
+
+        for box in (pagebox, "CROPBOX", "MEDIABOX", "BLEEDBOX"):
+            code, out, err = self._run(
+                [
+                    "--saveasimg",
+                    "--imgformat=PNG",
+                    f"--resolution={width}x{height}",
+                    f"--pagebox={box}",
+                    f"-p={page}",
+                    "-o=" + str(base),
+                    str(pdf),
+                ]
+            )
+            if self._collect_preview_output(output, base, pdf, before):
+                return
+            if code < 100 and output.is_file() and output.stat().st_size > 200:
+                return
+
+        raise CallasError(err or out or f"saveasimg exit {code}, файл не создан")
+
+    def _collect_preview_output(
+        self,
+        target: Path,
+        base: Path,
+        pdf: Path,
+        before: set[Path],
+    ) -> bool:
+        if target.is_file() and target.stat().st_size > 200:
+            return True
+
+        patterns = [
+            f"{target.name}",
+            f"{base.name}*.png",
+            f"{base.name}*.PNG",
+            f"{pdf.stem}*.png",
+        ]
+        for pattern in patterns:
+            for candidate in sorted(target.parent.glob(pattern)):
+                if candidate.stat().st_size > 200:
+                    if candidate != target:
+                        candidate.replace(target)
+                    return True
+
+        new_files = set(target.parent.glob("*.png")) - before
+        for candidate in sorted(new_files):
+            if candidate.stat().st_size > 200:
+                candidate.replace(target)
+                return True
+        return False
 
     def safety_report(self, pdf: Path, output: Path, page: int = 1) -> None:
         code, out, err = self._run(

@@ -438,7 +438,7 @@
         <div class="page-card">
           <h4>${p.label}</h4>
           <div class="page-inner">
-            <div class="thumb"><img src="${p.preview_markup}?t=${Date.now()}" alt="" /></div>
+            <div class="thumb"><img src="${p.preview_plain}?t=${Date.now()}" alt="" onerror="this.style.background='#ddd'" /></div>
             <div class="messages">
               ${p.messages.map(m => `<div class="msg ${m.level === "ok" ? "ok" : m.level === "error" ? "err" : "warn"}">${m.text}</div>`).join("")}
               ${p.has_safe_zone_warning ? `<button type="button" class="btn btn-orange fix-btn" data-page="${p.page}">Исправить</button>` : ""}
@@ -454,7 +454,7 @@
     function openFixModal(page) {
       previewPage = page;
       const p = session.pages.find(x => x.page === page);
-      if (p) document.getElementById("fixPreviewImg").src = p.preview_markup + "?t=" + Date.now();
+      if (p) document.getElementById("fixPreviewImg").src = p.preview_plain + "?t=" + Date.now();
       document.getElementById("fixModal").classList.add("open");
     }
 

@@ -89,6 +89,7 @@ class SessionState:
             "session_id": self.session_id,
             "order": asdict(self.order),
             "original_name": self.original_name,
+            "created_at": self.created_at,
             "fix_mode": self.fix_mode,
             "processed": self.processed,
             "needs_consent": self.needs_consent,
@@ -131,7 +132,7 @@ class VizitkaService:
             session_id=data["session_id"],
             order=order,
             original_name=data["original_name"],
-            created_at=data["created_at"],
+            created_at=data.get("created_at", ""),
             fix_mode=data.get("fix_mode", "stretch"),
             processed=data.get("processed", False),
             needs_consent=data.get("needs_consent", False),
@@ -422,17 +423,33 @@ class VizitkaService:
         return pages
 
     def _generate_previews(self, session_id: str, pdf: Path, page_count: int) -> None:
+        from app.preview import render_pdf_preview
+
         sdir = self._session_dir(session_id)
         for p in range(1, page_count + 1):
             plain = sdir / f"preview_p{p}_plain.png"
             markup = sdir / f"preview_p{p}_markup.png"
+            ok = False
+
             if self.callas:
                 try:
-                    self.callas.save_preview(pdf, plain, page=p, pagebox="TRIMBOX")
-                    self.callas.save_preview(pdf, markup, page=p, pagebox="BLEEDBOX")
+                    self.callas.save_preview(pdf, plain, page=p, pagebox="TRIMBOX", width=800, height=440)
+                    ok = plain.is_file() and plain.stat().st_size > 200
                 except CallasError as e:
-                    logger.warning("preview p%s: %s", p, e)
-            if not plain.is_file():
+                    logger.warning("callas preview p%s: %s", p, e)
+
+            if not ok:
+                ok = render_pdf_preview(pdf, p, plain, max_width=800, max_height=440)
+
+            if ok and (not markup.is_file() or markup.stat().st_size <= 200):
+                shutil.copy2(plain, markup)
+            elif self.callas and ok:
+                try:
+                    self.callas.save_preview(pdf, markup, page=p, pagebox="BLEEDBOX", width=800, height=440)
+                except CallasError:
+                    shutil.copy2(plain, markup)
+
+            if not plain.is_file() or plain.stat().st_size <= 200:
                 plain.write_bytes(_placeholder_png())
 
     def _validate_page_count(self, count: int, order: OrderConfig) -> None:
