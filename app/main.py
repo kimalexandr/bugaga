@@ -1,5 +1,6 @@
 import logging
 import os
+import tempfile
 from pathlib import Path
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
@@ -214,8 +215,6 @@ async def adjust_bleed(
     tmp_in = tmp_out = None
     ok = False
     try:
-        import tempfile
-
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f_in:
             f_in.write(content)
             tmp_in = f_in.name
