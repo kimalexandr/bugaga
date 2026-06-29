@@ -195,7 +195,6 @@ class VizitkaService:
             state.rgb_converted = rgb_ok
             state.bleed_applied = bleed_ok
         elif fix_mode != "as_is":
-            shutil.copy(working, sdir / "working.pdf")
             logger.warning("Callas недоступен — только анализ размеров")
 
         dims_after = page_dimensions(working)
@@ -331,7 +330,8 @@ class VizitkaService:
                 rgb_ok = True
 
         final = pdf.parent / "working.pdf"
-        shutil.copy(current, final)
+        if current.resolve() != final.resolve():
+            shutil.copy2(current, final)
         return final, rgb_ok, bleed_ok
 
     def _build_page_results(
