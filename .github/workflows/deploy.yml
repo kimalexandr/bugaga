@@ -1,0 +1,47 @@
+# Нужны секреты репозитория: Settings → Secrets and variables → Actions
+#   VPS_HOST    — IP или домен VPS (без ssh:// и без порта)
+#   VPS_USER    — пользователь SSH
+#   VPS_SSH_KEY — полный текст приватного ключа (BEGIN … END)
+# Опционально: VPS_PORT — только если SSH не на 22
+name: Deploy to VPS
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -e
+            # Неинтерактивный SSH часто даёт урезанный PATH — docker может быть в /usr/local/bin
+            export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH}"
+            DEPLOY_DIR="${HOME}/pdf-bleed-service"
+            if [ ! -d "$DEPLOY_DIR/.git" ]; then
+              git clone https://github.com/kimalexandr/bugaga.git "$DEPLOY_DIR"
+            fi
+            cd "$DEPLOY_DIR"
+            git pull origin main
+            if command -v docker >/dev/null 2>&1; then
+              if docker compose version >/dev/null 2>&1; then
+                docker compose up -d --build
+              elif command -v docker-compose >/dev/null 2>&1; then
+                docker-compose up -d --build
+              else
+                echo "ERROR: нет «docker compose» и нет docker-compose. Установите Compose или используйте путь без Docker."
+                exit 127
+              fi
+              docker system prune -f
+            else
+              echo "WARN: docker не найден — деплой через venv + uvicorn (scripts/deploy-no-docker.sh)"
+              bash scripts/deploy-no-docker.sh
+            fi

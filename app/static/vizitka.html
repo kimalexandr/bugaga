@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Визитки — заказ</title>
+  <style>
+    :root {
+      --green: #8bc34a;
+      --green-dark: #689f38;
+      --green-light: #dcedc8;
+      --orange: #ff9800;
+      --blue: #2196f3;
+      --text: #333;
+      --muted: #777;
+      --border: #e0e0e0;
+      --bg: #f5f5f5;
+      --font: system-ui, "Segoe UI", Roboto, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: var(--font); background: var(--bg); color: var(--text); }
+    .top { background: #fff; border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; justify-content: flex-end; }
+    .top a { color: var(--muted); text-decoration: none; font-size: 0.9rem; }
+    .wizard { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+    .steps { display: flex; align-items: center; justify-content: center; gap: 0; margin-bottom: 32px; flex-wrap: wrap; }
+    .step { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 0.85rem; }
+    .step .num {
+      width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--border);
+      display: flex; align-items: center; justify-content: center; font-weight: 600;
+    }
+    .step.done .num { background: var(--green); border-color: var(--green); color: #fff; }
+    .step.done .num::after { content: "✓"; font-size: 0.75rem; }
+    .step.done .num span { display: none; }
+    .step.active { color: var(--green-dark); font-weight: 600; }
+    .step.active .num { background: var(--green); border-color: var(--green); color: #fff; }
+    .step-line { width: 40px; height: 2px; background: var(--border); margin: 0 4px; }
+    .step-line.done { background: var(--green); }
+    .nav-row { display: flex; justify-content: space-between; margin-bottom: 20px; }
+    .btn {
+      padding: 10px 28px; border: none; border-radius: 4px; font-size: 0.85rem;
+      font-weight: 600; cursor: pointer; text-transform: uppercase; letter-spacing: 0.03em;
+    }
+    .btn-back { background: #fff; border: 1px solid var(--border); color: var(--muted); }
+    .btn-next { background: var(--green); color: #fff; }
+    .btn-next:hover { background: var(--green-dark); }
+    .btn-next:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-orange { background: var(--orange); color: #fff; }
+    .btn-blue { background: var(--blue); color: #fff; }
+    .panel { background: #fff; border-radius: 8px; padding: 28px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    h2 { margin: 0 0 20px; font-size: 1.25rem; }
+    .option-group { margin-bottom: 22px; }
+    .option-group h3 { font-size: 0.8rem; color: var(--muted); font-weight: 500; margin: 0 0 10px; text-transform: uppercase; }
+    .options { display: flex; flex-wrap: wrap; gap: 8px; }
+    .opt {
+      padding: 10px 16px; border: 2px solid var(--border); border-radius: 4px;
+      background: #fff; cursor: pointer; font-size: 0.9rem; transition: all .15s;
+    }
+    .opt:hover { border-color: var(--green); }
+    .opt.selected { background: var(--green); border-color: var(--green); color: #fff; }
+    .turnaround { display: flex; flex-direction: column; gap: 8px; }
+    .turn-opt {
+      padding: 12px 16px; border: 2px solid var(--border); border-radius: 4px;
+      cursor: pointer; display: flex; justify-content: space-between; align-items: center;
+    }
+    .turn-opt.selected { border-color: var(--green); background: var(--green-light); }
+    .layout-grid { display: grid; grid-template-columns: 240px 1fr; gap: 24px; }
+    @media (max-width: 768px) { .layout-grid { grid-template-columns: 1fr; } }
+    .order-side { font-size: 0.9rem; line-height: 1.6; }
+    .order-side strong { display: block; margin-bottom: 8px; }
+    .upload-btn {
+      display: block; width: 100%; padding: 14px; background: var(--green-light);
+      border: 2px dashed var(--green); color: var(--green-dark); font-weight: 600;
+      text-align: center; cursor: pointer; border-radius: 4px; margin: 12px 0;
+    }
+    .file-item { padding: 8px 12px; background: #f9f9f9; border-radius: 4px; font-size: 0.85rem; margin-top: 8px; }
+    .page-card { border: 1px solid var(--border); border-radius: 6px; padding: 16px; margin-bottom: 16px; }
+    .page-card h4 { margin: 0 0 12px; font-size: 0.95rem; }
+    .page-inner { display: flex; gap: 16px; flex-wrap: wrap; }
+    .thumb {
+      width: 140px; height: 78px; background: #eee; border-radius: 4px;
+      display: flex; align-items: center; justify-content: center; overflow: hidden;
+      position: relative; flex-shrink: 0;
+    }
+    .thumb img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    .messages { flex: 1; min-width: 200px; }
+    .msg { font-size: 0.85rem; margin-bottom: 8px; display: flex; gap: 8px; align-items: flex-start; }
+    .msg.warn::before { content: "⚠️"; }
+    .msg.ok::before { content: "✅"; }
+    .msg.err::before { content: "❌"; }
+    .overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 100;
+      display: none; align-items: center; justify-content: center; padding: 16px;
+    }
+    .overlay.open { display: flex; }
+    .modal {
+      background: #fff; border-radius: 8px; max-width: 900px; width: 100%;
+      max-height: 90vh; overflow: auto; box-shadow: 0 8px 32px rgba(0,0,0,.2);
+    }
+    .modal-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 20px; border-bottom: 1px solid var(--border);
+    }
+    .modal-body { padding: 20px; }
+    .modal-foot { padding: 16px 20px; border-top: 1px solid var(--border); display: flex; gap: 12px; justify-content: flex-end; }
+    .fix-layout { display: grid; grid-template-columns: 1fr 280px; gap: 20px; }
+    @media (max-width: 700px) { .fix-layout { grid-template-columns: 1fr; } }
+    .preview-box {
+      border: 1px solid var(--border); border-radius: 4px; padding: 16px;
+      text-align: center; position: relative; min-height: 200px;
+    }
+    .preview-box img { max-width: 100%; max-height: 320px; }
+    .preview-overlay-lines {
+      position: absolute; inset: 16px; pointer-events: none;
+      border: 2px dashed #4caf50; outline: 2px dashed #f44336; outline-offset: -12px;
+    }
+    .radio-opt { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; cursor: pointer; font-size: 0.9rem; }
+    .legend { font-size: 0.75rem; color: var(--muted); margin-top: 16px; line-height: 1.6; }
+    .legend .green { color: #4caf50; }
+    .legend .red { color: #f44336; }
+    .consent-text { font-size: 0.9rem; line-height: 1.6; margin-bottom: 16px; }
+    .hidden { display: none !important; }
+    .loading { opacity: 0.6; pointer-events: none; }
+    input[type="file"] { display: none; }
+    .approve-check { margin: 16px 0; font-size: 0.85rem; }
+    .approve-check label { cursor: pointer; }
+    .approve-note { font-size: 0.75rem; color: var(--muted); line-height: 1.5; margin-top: 8px; }
+    .error-banner { background: #ffebee; color: #c62828; padding: 12px; border-radius: 4px; margin-bottom: 16px; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <div class="top"><a href="/bleed">Инструмент вылетов</a> · <a href="/docs">API</a></div>
+  <div class="wizard">
+    <div class="steps" id="stepsBar"></div>
+    <div class="nav-row">
+      <button type="button" class="btn btn-back hidden" id="btnBack">Назад</button>
+      <button type="button" class="btn btn-next" id="btnNext">Далее</button>
+    </div>
+    <div id="errorBanner" class="error-banner hidden"></div>
+
+    <!-- Шаг 1: тип -->
+    <div class="panel step-panel" data-step="1">
+      <h2>Выберите продукцию</h2>
+      <div class="options">
+        <div class="opt selected" data-product="Визитки эконом">Визитки эконом</div>
+        <div class="opt" data-product="Визитки стандарт">Визитки стандарт</div>
+      </div>
+    </div>
+
+    <!-- Шаг 2: цена -->
+    <div class="panel step-panel hidden" data-step="2">
+      <h2>Параметры заказа</h2>
+      <div class="option-group">
+        <h3>Размер визитки</h3>
+        <div class="options" data-field="size">
+          <div class="opt selected" data-w="90" data-h="50">90×50 мм</div>
+          <div class="opt" data-w="85" data-h="55">85×55 мм</div>
+        </div>
+      </div>
+      <div class="option-group">
+        <h3>Цветность</h3>
+        <div class="options" data-field="sides">
+          <div class="opt" data-sides="4-0">С одной стороны (4-0)</div>
+          <div class="opt selected" data-sides="4-4">С двух сторон (4-4)</div>
+        </div>
+      </div>
+      <div class="option-group">
+        <h3>Материал</h3>
+        <div class="options" data-field="material">
+          <div class="opt selected" data-material="Мелованный картон 300">Мелованный картон 300</div>
+          <div class="opt" data-material="Кристалл 350">Кристалл 350</div>
+          <div class="opt" data-material="Глянцевый картон 270">Глянцевый картон 270</div>
+        </div>
+      </div>
+      <div class="option-group">
+        <h3>Тираж</h3>
+        <div class="options" data-field="qty" id="qtyOptions"></div>
+      </div>
+      <div class="option-group">
+        <h3>Варианты изготовления</h3>
+        <div class="turnaround" id="turnaround"></div>
+      </div>
+    </div>
+
+    <!-- Шаг 3: макет -->
+    <div class="panel step-panel hidden" data-step="3">
+      <div class="layout-grid">
+        <div class="order-side">
+          <strong>Ваш заказ:</strong>
+          <div id="orderSummary"></div>
+          <label class="upload-btn" for="pdfInput">Добавить файл</label>
+          <input type="file" id="pdfInput" accept="application/pdf,.pdf" />
+          <div id="fileList"></div>
+        </div>
+        <div id="preflightResults">
+          <p style="color:var(--muted)">Загрузите PDF-макет визитки.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Шаг 4: просмотр с разметкой -->
+    <div class="panel step-panel hidden" data-step="4">
+      <h2>Просмотр макета с разметкой</h2>
+      <p style="color:var(--muted);font-size:0.9rem">Нажмите на макет для показа второй стороны</p>
+      <div class="preview-box" id="markupPreview" style="margin-top:16px;cursor:pointer">
+        <div class="preview-overlay-lines"></div>
+        <img id="markupImg" alt="Макет" />
+      </div>
+      <div class="legend">
+        <div><span class="green">— —</span> линия реза или сгиба</div>
+        <div><span class="red">— —</span> безопасный отступ от реза (2 мм)</div>
+        <p style="color:#c62828;margin-top:12px">Внимание! Значимые элементы, выходящие за красную рамку, могут обрезаться.</p>
+      </div>
+    </div>
+
+    <!-- Шаг 5: согласование -->
+    <div class="panel step-panel hidden" data-step="5">
+      <h2>Просмотр макета без разметки</h2>
+      <p style="color:var(--muted);font-size:0.9rem">Макет будет напечатан именно так, как на экране.</p>
+      <div class="preview-box" id="plainPreview" style="margin-top:16px;cursor:pointer">
+        <img id="plainImg" alt="Макет" />
+      </div>
+      <div class="approve-check">
+        <label><input type="checkbox" id="approveCheck" /> Да, макет согласован</label>
+        <div class="approve-note">Подтверждаю, что макет не содержит запрещённого контента и готов к печати.</div>
+      </div>
+    </div>
+
+    <!-- Шаг 6: завершение -->
+    <div class="panel step-panel hidden" data-step="6">
+      <h2>Заказ готов к оплате</h2>
+      <p id="finishText"></p>
+      <button type="button" class="btn btn-next" id="btnDownload" style="margin-top:16px">Скачать обработанный PDF</button>
+    </div>
+  </div>
+
+  <!-- Модалка: варианты исправления -->
+  <div class="overlay" id="fixModal">
+    <div class="modal">
+      <div class="modal-head">
+        <button type="button" class="btn btn-back" id="fixCancel">Отмена</button>
+        <span style="font-size:0.85rem;color:var(--muted)">Выберите вариант, при котором элементы внутри красной области</span>
+        <button type="button" class="btn btn-next" id="fixOk">OK</button>
+      </div>
+      <div class="modal-body fix-layout">
+        <div class="preview-box">
+          <div class="preview-overlay-lines"></div>
+          <img id="fixPreviewImg" alt="" />
+        </div>
+        <div>
+          <strong>Варианты исправления</strong>
+          <div style="margin-top:12px">
+            <label class="radio-opt"><input type="radio" name="fixMode" value="as_is" /> Оставить как есть</label>
+            <label class="radio-opt"><input type="radio" name="fixMode" value="stretch" checked /> Растянуть края</label>
+            <label class="radio-opt"><input type="radio" name="fixMode" value="stretch_strong" /> Сильно растянуть края</label>
+            <label class="radio-opt"><input type="radio" name="fixMode" value="white_margins" /> Добавить белые поля</label>
+          </div>
+          <div class="legend">
+            <p style="color:#c62828">Внимание! Элементы за красной рамкой могут обрезаться.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модалка: согласие с изменениями -->
+  <div class="overlay" id="consentModal">
+    <div class="modal" style="max-width:520px">
+      <div class="modal-head"><strong>Внимание!</strong></div>
+      <div class="modal-body">
+        <div class="consent-text" id="consentBody"></div>
+      </div>
+      <div class="modal-foot" style="flex-direction:column">
+        <button type="button" class="btn btn-blue" id="consentAgree" style="width:100%">Я согласен с внесёнными изменениями. Продолжить</button>
+        <button type="button" class="btn btn-orange" id="consentStay" style="width:100%">Остаться и проверить</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const STEP_LABELS = ["тип", "цена", "макет", "разметка", "согласование", "завершение"];
+    let step = 1;
+    let session = null;
+    let previewPage = 1;
+    let order = {
+      product: "Визитки эконом",
+      width: 90, height: 50, sides: "4-4", material: "Мелованный картон 300",
+      quantity: 100, turnaround: "1 день", price: 216
+    };
+
+    const stepsBar = document.getElementById("stepsBar");
+    const btnBack = document.getElementById("btnBack");
+    const btnNext = document.getElementById("btnNext");
+    const errorBanner = document.getElementById("errorBanner");
+
+    function init() {
+      renderSteps();
+      initQty();
+      initTurnaround();
+      bindOptions();
+      btnBack.addEventListener("click", () => goStep(step - 1));
+      btnNext.addEventListener("click", onNext);
+      document.getElementById("pdfInput").addEventListener("change", onFileSelect);
+      document.getElementById("fixOk").addEventListener("click", applyFix);
+      document.getElementById("fixCancel").addEventListener("click", () => closeModal("fixModal"));
+      document.getElementById("consentAgree").addEventListener("click", onConsentAgree);
+      document.getElementById("consentStay").addEventListener("click", () => closeModal("consentModal"));
+      document.getElementById("markupPreview").addEventListener("click", flipPreview);
+      document.getElementById("plainPreview").addEventListener("click", flipPreview);
+      document.getElementById("approveCheck").addEventListener("change", onApprove);
+      document.getElementById("btnDownload").addEventListener("click", downloadPdf);
+      updateOrderSummary();
+    }
+
+    function renderSteps() {
+      stepsBar.innerHTML = STEP_LABELS.map((label, i) => {
+        const n = i + 1;
+        const cls = n < step ? "done" : n === step ? "active" : "";
+        const line = i < STEP_LABELS.length - 1 ? `<div class="step-line ${n < step ? "done" : ""}"></div>` : "";
+        return `<div class="step ${cls}"><div class="num"><span>${n}</span></div>${label}</div>${line}`;
+      }).join("");
+      document.querySelectorAll(".step-panel").forEach(p => {
+        p.classList.toggle("hidden", +p.dataset.step !== step);
+      });
+      btnBack.classList.toggle("hidden", step <= 1);
+      btnNext.textContent = step === 6 ? "Готово" : "Далее";
+      btnNext.disabled = (step === 3 && !session) || (step === 5 && !session?.approved);
+      if (step === 6) btnNext.classList.add("hidden"); else btnNext.classList.remove("hidden");
+    }
+
+    function goStep(n) {
+      if (n < 1 || n > 6) return;
+      step = n;
+      if (step === 4 && session) showPreview("markup");
+      if (step === 5 && session) showPreview("plain");
+      renderSteps();
+    }
+
+    function initQty() {
+      const el = document.getElementById("qtyOptions");
+      for (let q = 100; q <= 1000; q += 100) {
+        const d = document.createElement("div");
+        d.className = "opt" + (q === 100 ? " selected" : "");
+        d.dataset.qty = q;
+        d.textContent = q;
+        el.appendChild(d);
+      }
+    }
+
+    function initTurnaround() {
+      const items = [
+        { label: "За 3 часа — 400 руб.", sub: "готовность сегодня", price: 400 },
+        { label: "За 1 день — 216 руб.", sub: "готовность завтра", price: 216 },
+        { label: "За 2 дня — 138 руб.", sub: "готовность послезавтра", price: 138 }
+      ];
+      document.getElementById("turnaround").innerHTML = items.map((t, i) =>
+        `<div class="turn-opt ${i === 1 ? "selected" : ""}" data-price="${t.price}">
+          <span>${t.label}</span><span style="color:var(--muted);font-size:0.8rem">${t.sub}</span>
+        </div>`
+      ).join("");
+      document.querySelectorAll(".turn-opt").forEach(el => {
+        el.addEventListener("click", () => {
+          document.querySelectorAll(".turn-opt").forEach(x => x.classList.remove("selected"));
+          el.classList.add("selected");
+          order.price = +el.dataset.price;
+        });
+      });
+    }
+
+    function bindOptions() {
+      document.querySelectorAll(".options").forEach(group => {
+        group.querySelectorAll(".opt").forEach(opt => {
+          opt.addEventListener("click", () => {
+            group.querySelectorAll(".opt").forEach(x => x.classList.remove("selected"));
+            opt.classList.add("selected");
+            const field = group.dataset.field;
+            if (field === "size") { order.width = +opt.dataset.w; order.height = +opt.dataset.h; }
+            if (field === "sides") order.sides = opt.dataset.sides;
+            if (field === "material") order.material = opt.dataset.material;
+            if (field === "qty") order.quantity = +opt.dataset.qty;
+            updateOrderSummary();
+          });
+        });
+      });
+      document.querySelectorAll("[data-product]").forEach(el => {
+        el.addEventListener("click", () => {
+          document.querySelectorAll("[data-product]").forEach(x => x.classList.remove("selected"));
+          el.classList.add("selected");
+          order.product = el.dataset.product;
+        });
+      });
+    }
+
+    function updateOrderSummary() {
+      const sides = order.sides === "4-4" ? "С двух сторон (4-4)" : "С одной стороны (4-0)";
+      document.getElementById("orderSummary").innerHTML =
+        `${order.product}<br>${order.width} × ${order.height}, ${sides}, ${order.quantity} шт.<br>${order.material}`;
+    }
+
+    function showError(msg) {
+      errorBanner.textContent = msg;
+      errorBanner.classList.toggle("hidden", !msg);
+    }
+
+    async function onFileSelect(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      showError("");
+      document.getElementById("fileList").innerHTML =
+        `<div class="file-item">${file.name} (${(file.size/1024/1024).toFixed(2)} MB)</div>`;
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("width_mm", order.width);
+      fd.append("height_mm", order.height);
+      fd.append("sides", order.sides);
+      fd.append("quantity", order.quantity);
+      fd.append("material", order.material);
+      fd.append("fix_mode", "stretch");
+
+      document.querySelector(".wizard").classList.add("loading");
+      try {
+        const res = await fetch("/api/vizitka/upload", { method: "POST", body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || res.statusText);
+        session = data;
+        renderPreflight(data);
+        btnNext.disabled = false;
+        if (data.needs_consent) showConsentModal(data);
+      } catch (err) {
+        showError(err.message);
+      } finally {
+        document.querySelector(".wizard").classList.remove("loading");
+      }
+    }
+
+    function renderPreflight(data) {
+      const el = document.getElementById("preflightResults");
+      el.innerHTML = data.pages.map(p => `
+        <div class="page-card">
+          <h4>${p.label}</h4>
+          <div class="page-inner">
+            <div class="thumb"><img src="${p.preview_markup}?t=${Date.now()}" alt="" /></div>
+            <div class="messages">
+              ${p.messages.map(m => `<div class="msg ${m.level === "ok" ? "ok" : m.level === "error" ? "err" : "warn"}">${m.text}</div>`).join("")}
+              ${p.has_safe_zone_warning ? `<button type="button" class="btn btn-orange fix-btn" data-page="${p.page}">Исправить</button>` : ""}
+            </div>
+          </div>
+        </div>
+      `).join("");
+      el.querySelectorAll(".fix-btn").forEach(btn => {
+        btn.addEventListener("click", () => openFixModal(+btn.dataset.page));
+      });
+    }
+
+    function openFixModal(page) {
+      previewPage = page;
+      const p = session.pages.find(x => x.page === page);
+      if (p) document.getElementById("fixPreviewImg").src = p.preview_markup + "?t=" + Date.now();
+      document.getElementById("fixModal").classList.add("open");
+    }
+
+    function closeModal(id) { document.getElementById(id).classList.remove("open"); }
+
+    async function applyFix() {
+      const mode = document.querySelector('input[name="fixMode"]:checked')?.value || "stretch";
+      closeModal("fixModal");
+      const fd = new FormData();
+      fd.append("fix_mode", mode);
+      document.querySelector(".wizard").classList.add("loading");
+      try {
+        const res = await fetch(`/api/vizitka/${session.session_id}/fix`, { method: "POST", body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || res.statusText);
+        session = data;
+        renderPreflight(data);
+        if (data.needs_consent) showConsentModal(data);
+      } catch (err) { showError(err.message); }
+      finally { document.querySelector(".wizard").classList.remove("loading"); }
+    }
+
+    function showConsentModal(data) {
+      const lines = data.pages.flatMap(p => p.messages.filter(m => m.level === "warning").map(m => m.text));
+      document.getElementById("consentBody").innerHTML = lines.length
+        ? lines.map(t => `<p>⚠️ ${t}</p>`).join("")
+        : "<p>⚠️ Макет был автоматически обработан (вылеты / цвет).</p>";
+      document.getElementById("consentModal").classList.add("open");
+    }
+
+    async function onConsentAgree() {
+      closeModal("consentModal");
+      const res = await fetch(`/api/vizitka/${session.session_id}/consent`, { method: "POST" });
+      session = await res.json();
+    }
+
+    function showPreview(kind) {
+      if (!session?.pages?.length) return;
+      const p = session.pages.find(x => x.page === previewPage) || session.pages[0];
+      const src = kind === "markup" ? p.preview_markup : p.preview_plain;
+      const img = kind === "markup" ? document.getElementById("markupImg") : document.getElementById("plainImg");
+      img.src = src + "?t=" + Date.now();
+    }
+
+    function flipPreview() {
+      if (!session?.pages || session.pages.length < 2) return;
+      previewPage = previewPage === 1 ? 2 : 1;
+      if (step === 4) showPreview("markup");
+      if (step === 5) showPreview("plain");
+    }
+
+    async function onApprove() {
+      const approved = document.getElementById("approveCheck").checked;
+      const fd = new FormData();
+      fd.append("approved", approved ? "1" : "0");
+      const res = await fetch(`/api/vizitka/${session.session_id}/approve`, { method: "POST", body: fd });
+      session = await res.json();
+      btnNext.disabled = !approved;
+    }
+
+    async function onNext() {
+      if (step === 3) {
+        if (!session) { showError("Загрузите PDF-макет."); return; }
+        if (session.needs_consent) { showConsentModal(session); return; }
+      }
+      if (step === 5 && !document.getElementById("approveCheck").checked) {
+        showError("Подтвердите согласование макета."); return;
+      }
+      if (step === 5) {
+        document.getElementById("finishText").textContent =
+          `${order.product}, ${order.quantity} шт. — макет согласован.`;
+        goStep(6);
+        return;
+      }
+      goStep(step + 1);
+    }
+
+    function downloadPdf() {
+      if (!session) return;
+      window.open(`/api/vizitka/${session.session_id}/download`, "_blank");
+    }
+
+    init();
+  </script>
+</body>
+</html>
