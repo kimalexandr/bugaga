@@ -14,6 +14,8 @@ from typing import Any
 import pikepdf
 
 from app.callas_client import CallasClient, CallasError
+from app.preflight import PagePreflight, analyze_pdf
+from app.processor import adjust_bleed_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -58,16 +60,22 @@ class PageResult:
     height_mm: float
     messages: list[PageMessage] = field(default_factory=list)
     has_safe_zone_warning: bool = False
+    needs_fix: bool = False
+    preflight: dict | None = None
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "page": self.page,
             "label": self.label,
             "width_mm": round(self.width_mm, 2),
             "height_mm": round(self.height_mm, 2),
             "messages": [m.to_dict() for m in self.messages],
             "has_safe_zone_warning": self.has_safe_zone_warning,
+            "needs_fix": self.needs_fix,
         }
+        if self.preflight:
+            d["preflight"] = self.preflight
+        return d
 
 
 @dataclass
@@ -82,6 +90,7 @@ class SessionState:
     rgb_converted: bool = False
     bleed_applied: bool = False
     approved: bool = False
+    preview_ready: bool = False
     pages: list[PageResult] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -96,6 +105,7 @@ class SessionState:
             "rgb_converted": self.rgb_converted,
             "bleed_applied": self.bleed_applied,
             "approved": self.approved,
+            "preview_ready": self.preview_ready,
             "pages": [p.to_dict() for p in self.pages],
         }
 
@@ -125,6 +135,8 @@ class VizitkaService:
                 height_mm=p["height_mm"],
                 messages=[PageMessage(**m) for m in p["messages"]],
                 has_safe_zone_warning=p.get("has_safe_zone_warning", False),
+                needs_fix=p.get("needs_fix", False),
+                preflight=p.get("preflight"),
             )
             for p in data.get("pages", [])
         ]
@@ -139,6 +151,7 @@ class VizitkaService:
             rgb_converted=data.get("rgb_converted", False),
             bleed_applied=data.get("bleed_applied", False),
             approved=data.get("approved", False),
+            preview_ready=data.get("preview_ready", False),
             pages=pages,
         )
 
@@ -179,33 +192,41 @@ class VizitkaService:
             fix_mode=fix_mode if fix_mode in FIX_MODES else "stretch",
         )
 
-        dims_before = page_dimensions(original)
-        self._validate_page_count(len(dims_before), order)
+        page_count = len(analyze_pdf(original, target_w_mm=order.width_mm, target_h_mm=order.height_mm))
+        self._validate_page_count(page_count, order)
 
-        had_bleed = any(has_bleed_box(d) for d in dims_before)
-        size_mismatch = any(
-            not size_matches(d["width_mm"], d["height_mm"], order.width_mm, order.height_mm)
-            for d in dims_before
+        dims_before_pf = analyze_pdf(
+            original,
+            target_w_mm=order.width_mm,
+            target_h_mm=order.height_mm,
+            required_bleed_mm=order.bleed_mm,
         )
 
         working = sdir / "working.pdf"
         shutil.copy(original, working)
 
-        if self.callas and fix_mode != "as_is":
-            working, rgb_ok, bleed_ok = self._apply_callas_pipeline(working, order, fix_mode)
+        if fix_mode != "as_is":
+            working, rgb_ok, bleed_ok = self._apply_fix_pipeline(working, order, fix_mode)
             state.rgb_converted = rgb_ok
             state.bleed_applied = bleed_ok
-        elif fix_mode != "as_is":
-            logger.warning("Callas недоступен — только анализ размеров")
+        else:
+            state.rgb_converted = False
+            state.bleed_applied = False
 
-        dims_after = page_dimensions(working)
-        state.pages = self._build_page_results(
-            dims_before, dims_after, order, had_bleed, size_mismatch, state
+        dims_after_pf = analyze_pdf(
+            working,
+            target_w_mm=order.width_mm,
+            target_h_mm=order.height_mm,
+            required_bleed_mm=order.bleed_mm,
         )
+        state.pages = self._build_page_results(dims_before_pf, dims_after_pf, order, state)
         state.processed = fix_mode != "as_is"
-        state.needs_consent = state.processed and (not had_bleed or size_mismatch)
+        state.needs_consent = state.processed and any(
+            not b.has_bleed or not b.size_ok for b in dims_before_pf
+        )
 
-        self._generate_previews(session_id, working, len(dims_after))
+        preview_ok = self._generate_previews(session_id, working, len(dims_after_pf))
+        state.preview_ready = preview_ok
         self._save_meta(state)
         return state
 
@@ -220,30 +241,34 @@ class VizitkaService:
         working = sdir / "working.pdf"
         shutil.copy(original, working)
 
-        dims_before = page_dimensions(original)
+        dims_before_pf = analyze_pdf(
+            original,
+            target_w_mm=state.order.width_mm,
+            target_h_mm=state.order.height_mm,
+            required_bleed_mm=state.order.bleed_mm,
+        )
 
-        if self.callas and fix_mode != "as_is":
-            working, rgb_ok, bleed_ok = self._apply_callas_pipeline(working, state.order, fix_mode)
+        if fix_mode != "as_is":
+            working, rgb_ok, bleed_ok = self._apply_fix_pipeline(working, state.order, fix_mode)
             state.rgb_converted = rgb_ok
             state.bleed_applied = bleed_ok
         else:
             state.rgb_converted = False
             state.bleed_applied = False
 
-        dims_after = page_dimensions(working)
-        had_bleed = any(has_bleed_box(d) for d in dims_before)
-        size_mismatch = any(
-            not size_matches(d["width_mm"], d["height_mm"], state.order.width_mm, state.order.height_mm)
-            for d in dims_before
+        dims_after_pf = analyze_pdf(
+            working,
+            target_w_mm=state.order.width_mm,
+            target_h_mm=state.order.height_mm,
+            required_bleed_mm=state.order.bleed_mm,
         )
-        state.pages = self._build_page_results(
-            dims_before, dims_after, state.order, had_bleed, size_mismatch, state
-        )
+        state.pages = self._build_page_results(dims_before_pf, dims_after_pf, state.order, state)
         state.processed = fix_mode != "as_is"
-        state.needs_consent = state.processed and (not had_bleed or size_mismatch)
+        state.needs_consent = state.processed and any(
+            not b.has_bleed or not b.size_ok for b in dims_before_pf
+        )
         state.approved = False
-
-        self._generate_previews(session_id, working, len(dims_after))
+        state.preview_ready = self._generate_previews(session_id, working, len(dims_after_pf))
         self._save_meta(state)
         return state
 
@@ -261,6 +286,28 @@ class VizitkaService:
 
     def get_state(self, session_id: str) -> SessionState:
         return self._load_meta(session_id)
+
+    def _apply_fix_pipeline(
+        self, pdf: Path, order: OrderConfig, fix_mode: str
+    ) -> tuple[Path, bool, bool]:
+        rgb_ok = False
+        bleed_ok = False
+
+        if self.callas:
+            pdf, rgb_ok, bleed_ok = self._apply_callas_pipeline(pdf, order, fix_mode)
+
+        if not bleed_ok and fix_mode in ("stretch", "stretch_strong", "white_margins"):
+            tmp = pdf.parent / "step_boxes.pdf"
+            try:
+                adjust_bleed_pdf(str(pdf), str(tmp), order.bleed_mm, add_crop_marks=False)
+                if tmp.is_file():
+                    shutil.copy2(tmp, pdf)
+                    bleed_ok = True
+                    logger.info("вылеты через pikepdf (боксы, без растяжения контента)")
+            except Exception as e:
+                logger.warning("pikepdf bleed: %s", e)
+
+        return pdf, rgb_ok, bleed_ok
 
     def _apply_callas_pipeline(
         self, pdf: Path, order: OrderConfig, fix_mode: str
@@ -337,11 +384,9 @@ class VizitkaService:
 
     def _build_page_results(
         self,
-        before: list[dict],
-        after: list[dict],
+        before: list[PagePreflight],
+        after: list[PagePreflight],
         order: OrderConfig,
-        had_bleed: bool,
-        size_mismatch: bool,
         state: SessionState,
     ) -> list[PageResult]:
         pages: list[PageResult] = []
@@ -350,82 +395,97 @@ class VizitkaService:
         for i, (b, a) in enumerate(zip(before, after)):
             page_num = i + 1
             messages: list[PageMessage] = []
-            dw = round(a["width_mm"] - b["width_mm"], 1)
-            dh = round(a["height_mm"] - b["height_mm"], 1)
 
-            if state.fix_mode != "as_is" and (abs(dw) > 0.1 or abs(dh) > 0.1):
-                parts = []
-                if abs(dw) > 0.1:
-                    parts.append(f"растянут по ширине на {abs(dw):.0f}мм")
-                if abs(dh) > 0.1:
-                    parts.append(f"растянут по высоте на {abs(dh):.0f}мм")
-                messages.append(
-                    PageMessage(
-                        "warning",
-                        f"Внимание! Размер {order.width_mm:.0f}x{order.height_mm:.0f} мм был "
-                        + ", ".join(parts),
+            for m in b.messages:
+                messages.append(PageMessage(m["level"], m["text"]))
+
+            if state.fix_mode != "as_is":
+                dw = round(a.trim_w_mm - b.trim_w_mm, 1)
+                dh = round(a.trim_h_mm - b.trim_h_mm, 1)
+                if abs(dw) > 0.2 or abs(dh) > 0.2:
+                    parts = []
+                    if abs(dw) > 0.2:
+                        parts.append(f"ширина изменена на {abs(dw):.1f} мм")
+                    if abs(dh) > 0.2:
+                        parts.append(f"высота изменена на {abs(dh):.1f} мм")
+                    messages.append(
+                        PageMessage(
+                            "warning",
+                            f"После обработки: {', '.join(parts)}.",
+                        )
                     )
-                )
-            elif size_mismatch and not had_bleed:
-                messages.append(
-                    PageMessage(
-                        "warning",
-                        f"Макет загружен без вылетов. Рекомендуется добавить "
-                        f"{order.bleed_mm:.0f} мм вылет и загрузить снова.",
+
+                if a.has_bleed and not b.has_bleed:
+                    messages.append(PageMessage("ok", "Вылеты добавлены / расширены"))
+                elif a.has_bleed:
+                    messages.append(PageMessage("ok", "Вылеты OK"))
+
+                if state.rgb_converted:
+                    messages.append(
+                        PageMessage(
+                            "ok",
+                            "Автоматически исправлено: RGB → CMYK (Callas)",
+                            auto_fixed=True,
+                        )
                     )
-                )
+                elif b.has_rgb and not a.has_rgb:
+                    messages.append(PageMessage("ok", "RGB-объекты не обнаружены после обработки"))
+                elif b.has_rgb and not state.rgb_converted:
+                    messages.append(
+                        PageMessage(
+                            "warning",
+                            "RGB остаётся — Callas CMYK недоступен или не сработал.",
+                        )
+                    )
 
             safe_warn = False
-            working_pdf = self._session_dir(state.session_id) / "working.pdf"
-            if self.callas and working_pdf.is_file():
-                report = self._session_dir(state.session_id) / f"preflight_p{page_num}.xml"
+            if self.callas:
+                working_pdf = self._session_dir(state.session_id) / "working.pdf"
                 profile = self.callas.find_profile("Check and fix bleed.kfpx", "*Check*bleed*")
-                if profile:
+                if profile and working_pdf.is_file():
+                    report = self._session_dir(state.session_id) / f"preflight_p{page_num}.xml"
                     try:
                         res = self.callas.run_profile(
                             profile, working_pdf, analyze_only=True, report_xml=report
                         )
                         for hit in res.hits:
-                            msg = hit.get("message", "")
-                            if msg and ("safe" in msg.lower() or "рез" in msg.lower() or "trim" in msg.lower()):
+                            msg = (hit.get("message") or "").strip()
+                            if msg:
                                 safe_warn = True
                                 messages.append(PageMessage("warning", msg))
                     except CallasError:
                         pass
 
-            if not safe_warn and state.fix_mode != "as_is":
-                messages.append(
-                    PageMessage("warning", "Найдены элементы, близкие к линии реза")
-                )
-                safe_warn = True
-
-            if state.bleed_applied:
-                messages.append(PageMessage("ok", "Вылеты OK"))
-            if state.rgb_converted:
-                messages.append(
-                    PageMessage(
-                        "ok",
-                        "Автоматически исправлено: RGB цвета переведены в CMYK",
-                        auto_fixed=True,
-                    )
-                )
+            needs_fix = not a.has_bleed or not a.size_ok or safe_warn
 
             pages.append(
                 PageResult(
                     page=page_num,
                     label=labels[i] if i < len(labels) else f"Страница {page_num}",
-                    width_mm=a["width_mm"],
-                    height_mm=a["height_mm"],
+                    width_mm=a.trim_w_mm,
+                    height_mm=a.trim_h_mm,
                     messages=messages,
                     has_safe_zone_warning=safe_warn,
+                    needs_fix=needs_fix,
+                    preflight=a.to_dict(),
                 )
             )
         return pages
 
-    def _generate_previews(self, session_id: str, pdf: Path, page_count: int) -> None:
+    def ensure_preview(self, session_id: str, page: int, markup: bool = False) -> Path:
+        path = self.preview_path(session_id, page, markup)
+        if path.is_file() and path.stat().st_size > 500:
+            return path
+        pdf = self.working_pdf(session_id)
+        count = len(analyze_pdf(pdf, target_w_mm=90, target_h_mm=50))
+        self._generate_previews(session_id, pdf, count)
+        return path
+
+    def _generate_previews(self, session_id: str, pdf: Path, page_count: int) -> bool:
         from app.preview import render_pdf_preview
 
         sdir = self._session_dir(session_id)
+        all_ok = True
         for p in range(1, page_count + 1):
             plain = sdir / f"preview_p{p}_plain.png"
             markup = sdir / f"preview_p{p}_markup.png"
@@ -433,24 +493,21 @@ class VizitkaService:
 
             if self.callas:
                 try:
-                    self.callas.save_preview(pdf, plain, page=p, pagebox="TRIMBOX", width=800, height=440)
-                    ok = plain.is_file() and plain.stat().st_size > 200
+                    self.callas.save_preview(pdf, plain, page=p, pagebox="MEDIABOX", width=900, height=500)
+                    ok = plain.is_file() and plain.stat().st_size > 500
                 except CallasError as e:
                     logger.warning("callas preview p%s: %s", p, e)
 
             if not ok:
-                ok = render_pdf_preview(pdf, p, plain, max_width=800, max_height=440)
+                ok = render_pdf_preview(pdf, p, plain, max_width=900, max_height=500)
 
-            if ok and (not markup.is_file() or markup.stat().st_size <= 200):
+            if ok:
                 shutil.copy2(plain, markup)
-            elif self.callas and ok:
-                try:
-                    self.callas.save_preview(pdf, markup, page=p, pagebox="BLEEDBOX", width=800, height=440)
-                except CallasError:
-                    shutil.copy2(plain, markup)
+            else:
+                all_ok = False
+                logger.error("не удалось создать превью стр.%s для %s", p, pdf)
 
-            if not plain.is_file() or plain.stat().st_size <= 200:
-                plain.write_bytes(_placeholder_png())
+        return all_ok
 
     def _validate_page_count(self, count: int, order: OrderConfig) -> None:
         expected = order.page_count_expected

@@ -1,3 +1,4 @@
+import base64
 import logging
 import os
 import tempfile
@@ -155,9 +156,12 @@ async def vizitka_state(session_id: str):
 @app.get("/api/vizitka/{session_id}/preview/{page}")
 async def vizitka_preview(session_id: str, page: int, markup: int = 0):
     svc = _get_vizitka()
-    path = svc.preview_path(session_id, page, bool(markup))
-    if not path.is_file():
-        raise HTTPException(404, "Превью не найдено")
+    try:
+        path = svc.ensure_preview(session_id, page, bool(markup))
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e)) from e
+    if not path.is_file() or path.stat().st_size < 500:
+        raise HTTPException(404, "Превью не удалось сгенерировать")
     return FileResponse(path, media_type="image/png")
 
 
@@ -186,11 +190,21 @@ async def vizitka_download(session_id: str):
 def _enrich_response(state) -> dict:
     data = state.to_dict()
     sid = state.session_id
+    svc = _get_vizitka()
     for p in data["pages"]:
         n = p["page"]
         p["preview_plain"] = f"/api/vizitka/{sid}/preview/{n}?markup=0"
         p["preview_markup"] = f"/api/vizitka/{sid}/preview/{n}?markup=1"
+        for key, markup in (("preview_plain_b64", False), ("preview_markup_b64", True)):
+            try:
+                path = svc.ensure_preview(sid, n, markup)
+                if path.is_file() and path.stat().st_size > 500:
+                    b64 = base64.b64encode(path.read_bytes()).decode("ascii")
+                    p[key] = f"data:image/png;base64,{b64}"
+            except (FileNotFoundError, OSError) as e:
+                logging.warning("preview b64 p%s: %s", n, e)
     data["callas_available"] = _get_callas() is not None
+    data["preview_ready"] = getattr(state, "preview_ready", False)
     data["can_proceed"] = not state.needs_consent and all(
         not any(m["level"] == "error" for m in p["messages"]) for p in data["pages"]
     )

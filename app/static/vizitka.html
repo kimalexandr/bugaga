@@ -432,16 +432,30 @@
       }
     }
 
+    function previewSrc(p, markup) {
+      if (markup) return p.preview_markup_b64 || p.preview_markup;
+      return p.preview_plain_b64 || p.preview_plain;
+    }
+
     function renderPreflight(data) {
       const el = document.getElementById("preflightResults");
-      el.innerHTML = data.pages.map(p => `
+      let header = "";
+      if (!data.preview_ready) {
+        header = `<div class="error-banner">Превью не сгенерировано. Пересоберите Docker: <code>docker compose up -d --build</code></div>`;
+      }
+      if (!data.callas_available) {
+        header += `<p style="font-size:0.85rem;color:var(--muted)">Callas недоступен: проверяем боксы PDF (pikepdf). Растяжение контента — только через Callas.</p>`;
+      } else {
+        header += `<p style="font-size:0.85rem;color:var(--muted)">Проверка: размер TrimBox, вылеты (Bleed/Media), RGB, обработка Callas.</p>`;
+      }
+      el.innerHTML = header + data.pages.map(p => `
         <div class="page-card">
-          <h4>${p.label}</h4>
+          <h4>${p.label} — ${p.width_mm}×${p.height_mm} мм</h4>
           <div class="page-inner">
-            <div class="thumb"><img src="${p.preview_plain}?t=${Date.now()}" alt="" onerror="this.style.background='#ddd'" /></div>
+            <div class="thumb"><img src="${previewSrc(p, false)}" alt="стр.${p.page}" /></div>
             <div class="messages">
               ${p.messages.map(m => `<div class="msg ${m.level === "ok" ? "ok" : m.level === "error" ? "err" : "warn"}">${m.text}</div>`).join("")}
-              ${p.has_safe_zone_warning ? `<button type="button" class="btn btn-orange fix-btn" data-page="${p.page}">Исправить</button>` : ""}
+              ${p.needs_fix ? `<button type="button" class="btn btn-orange fix-btn" data-page="${p.page}">Исправить</button>` : ""}
             </div>
           </div>
         </div>
@@ -454,7 +468,7 @@
     function openFixModal(page) {
       previewPage = page;
       const p = session.pages.find(x => x.page === page);
-      if (p) document.getElementById("fixPreviewImg").src = p.preview_plain + "?t=" + Date.now();
+      if (p) document.getElementById("fixPreviewImg").src = previewSrc(p, false);
       document.getElementById("fixModal").classList.add("open");
     }
 
@@ -494,7 +508,7 @@
     function showPreview(kind) {
       if (!session?.pages?.length) return;
       const p = session.pages.find(x => x.page === previewPage) || session.pages[0];
-      const src = kind === "markup" ? p.preview_markup : p.preview_plain;
+      const src = previewSrc(p, kind === "markup");
       const img = kind === "markup" ? document.getElementById("markupImg") : document.getElementById("plainImg");
       img.src = src + "?t=" + Date.now();
     }
