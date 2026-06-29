@@ -120,6 +120,7 @@
     .consent-text { font-size: 0.9rem; line-height: 1.6; margin-bottom: 16px; }
     .hidden { display: none !important; }
     .preview-box.loading img { opacity: 0.35; filter: grayscale(30%); }
+    .preview-box.markup-baked .preview-overlay-lines { display: none; }
     .loading { opacity: 0.6; pointer-events: none; }
     input[type="file"] { display: none; }
     .approve-check { margin: 16px 0; font-size: 0.85rem; }
@@ -202,7 +203,7 @@
     <div class="panel step-panel hidden" data-step="4">
       <h2>Просмотр макета с разметкой</h2>
       <p style="color:var(--muted);font-size:0.9rem">Нажмите на макет для показа второй стороны</p>
-      <div class="preview-box" id="markupPreview" style="margin-top:16px;cursor:pointer">
+      <div class="preview-box markup-baked" id="markupPreview" style="margin-top:16px;cursor:pointer">
         <div class="preview-overlay-lines"></div>
         <img id="markupImg" alt="Макет" />
       </div>
@@ -243,7 +244,7 @@
         <button type="button" class="btn btn-next" id="fixOk">OK</button>
       </div>
       <div class="modal-body fix-layout">
-        <div class="preview-box">
+        <div class="preview-box markup-baked">
           <div class="preview-overlay-lines"></div>
           <img id="fixPreviewImg" alt="" />
         </div>
@@ -522,7 +523,7 @@
       if (radio) radio.checked = true;
       const p = session.pages.find(x => x.page === page);
       if (p) {
-        setImgSrc(document.getElementById("fixPreviewImg"), previewSrc(p, false));
+        setImgSrc(document.getElementById("fixPreviewImg"), previewSrc(p, true));
         updateFixHint(p);
       }
       document.getElementById("fixModal").classList.add("open");
@@ -539,6 +540,7 @@
       box.classList.add("loading");
       const fd = new FormData();
       fd.append("fix_mode", mode);
+      fd.append("preview_only", "1");
       try {
         const res = await fetch(`/api/vizitka/${session.session_id}/fix`, {
           method: "POST",
@@ -550,7 +552,7 @@
         session = data;
         const p = data.pages.find(x => x.page === previewPage) || data.pages[0];
         if (p) {
-          setImgSrc(img, previewSrc(p, false));
+          setImgSrc(img, previewSrc(p, true));
           updateFixHint(p);
         }
       } catch (err) {
@@ -575,11 +577,6 @@
       const mode = document.querySelector('input[name="fixMode"]:checked')?.value || "stretch";
       closeModal("fixModal");
       fixModeOnOpen = mode;
-      if (session?.fix_mode === mode) {
-        renderPreflight(session);
-        if (session.needs_consent) showConsentModal(session);
-        return;
-      }
       const fd = new FormData();
       fd.append("fix_mode", mode);
       document.querySelector(".wizard").classList.add("loading");

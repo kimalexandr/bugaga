@@ -183,6 +183,43 @@ class CallasClient:
                 return True
         return False
 
+    def save_safety_preview(
+        self,
+        pdf: Path,
+        output: Path,
+        *,
+        page: int = 1,
+        safe_mm: float = 2.0,
+        use_bleed: bool = True,
+        width: int = 900,
+        height: int = 500,
+    ) -> None:
+        """Превью с линиями реза (зелёная) и безопасной зоны (красная) — как в эталонном UI."""
+        output.parent.mkdir(parents=True, exist_ok=True)
+        before = {p for p in output.parent.glob("*.png")}
+        base = output.with_suffix("")
+
+        args = [
+            "--visualizer",
+            "--language=ru",
+            f"--part=safety_full",
+            "--imgformat=PNG",
+            f"--resolution={width}x{height}",
+            f"--safetyinside={safe_mm:g}mm",
+            f"-p={page}",
+            "-o=" + str(base),
+            str(pdf),
+        ]
+        if use_bleed:
+            args.insert(2, "--usebleed")
+
+        code, out, err = self._run(args)
+        if self._collect_preview_output(output, base, pdf, before):
+            return
+        if code < 100 and output.is_file() and output.stat().st_size > 200:
+            return
+        raise CallasError(err or out or f"visualizer safety_full exit {code}")
+
     def safety_report(self, pdf: Path, output: Path, page: int = 1) -> None:
         code, out, err = self._run(
             [

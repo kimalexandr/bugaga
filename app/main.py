@@ -109,12 +109,14 @@ async def vizitka_upload(
 
 
 @app.post("/api/vizitka/{session_id}/fix")
-async def vizitka_fix(session_id: str, fix_mode: str = Form(...)):
+async def vizitka_fix(session_id: str, fix_mode: str = Form(...), preview_only: int = Form(0)):
     if fix_mode not in FIX_MODES:
         raise HTTPException(400, f"Режим должен быть один из: {', '.join(FIX_MODES)}")
 
     try:
-        state = _get_vizitka().apply_fix(session_id, fix_mode)
+        state = _get_vizitka().apply_fix(
+            session_id, fix_mode, convert_cmyk=not bool(preview_only)
+        )
     except FileNotFoundError as e:
         raise HTTPException(404, str(e)) from e
     except ValueError as e:

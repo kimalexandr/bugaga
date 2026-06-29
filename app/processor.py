@@ -80,3 +80,46 @@ def adjust_bleed_pdf(
 
         pdf.save(output_path, fix_metadata_version=True)
         logging.info(f"✅ Обработано {len(pdf.pages)} стр. → {output_path}")
+
+
+def apply_white_margins_pdf(
+    input_path: str,
+    output_path: str,
+    margin_mm: float = 2.0,
+) -> None:
+    """Уменьшить контент и добавить белые поля внутри TrimBox (режим «белые поля»)."""
+    try:
+        import fitz
+    except ImportError as e:
+        raise RuntimeError("PyMuPDF нужен для белых полей") from e
+
+    margin_pt = margin_mm * MM_TO_PT
+    doc = fitz.open(input_path)
+    out = fitz.open()
+
+    for pno in range(doc.page_count):
+        src = doc[pno]
+        trim = src.trimbox if src.trimbox else src.rect
+        bleed = src.bleedbox if src.bleedbox else src.mediabox
+        inner = fitz.Rect(
+            trim.x0 + margin_pt,
+            trim.y0 + margin_pt,
+            trim.x1 - margin_pt,
+            trim.y1 - margin_pt,
+        )
+        if inner.width <= 0 or inner.height <= 0:
+            inner = trim
+
+        page = out.new_page()
+        page.set_mediabox(bleed)
+        page.set_cropbox(bleed)
+        page.set_trimbox(trim)
+        if src.bleedbox:
+            page.set_bleedbox(src.bleedbox)
+        page.draw_rect(trim, color=(1, 1, 1), fill=(1, 1, 1))
+        page.show_pdf_page(inner, doc, pno, clip=trim, keep_proportion=True)
+
+    out.save(output_path, garbage=4, deflate=True)
+    out.close()
+    doc.close()
+    logging.info("✅ Белые поля %.1f мм → %s", margin_mm, output_path)

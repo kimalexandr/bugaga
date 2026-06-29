@@ -15,7 +15,7 @@ import pikepdf
 
 from app.callas_client import CallasClient, CallasError
 from app.preflight import PagePreflight, analyze_pdf
-from app.processor import adjust_bleed_pdf
+from app.processor import adjust_bleed_pdf, apply_white_margins_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +206,9 @@ class VizitkaService:
         shutil.copy(original, working)
 
         if fix_mode != "as_is":
-            working, rgb_ok, bleed_ok = self._apply_fix_pipeline(working, order, fix_mode)
+            working, rgb_ok, bleed_ok = self._apply_fix_pipeline(
+                working, order, fix_mode, convert_cmyk=True
+            )
             state.rgb_converted = rgb_ok
             state.bleed_applied = bleed_ok
         else:
@@ -225,12 +227,14 @@ class VizitkaService:
             not b.has_bleed or not b.size_ok for b in dims_before_pf
         )
 
-        preview_ok = self._generate_previews(session_id, working, len(dims_after_pf))
+        preview_ok = self._generate_previews(session_id, working, len(dims_after_pf), order)
         state.preview_ready = preview_ok
         self._save_meta(state)
         return state
 
-    def apply_fix(self, session_id: str, fix_mode: str) -> SessionState:
+    def apply_fix(
+        self, session_id: str, fix_mode: str, *, convert_cmyk: bool = True
+    ) -> SessionState:
         if fix_mode not in FIX_MODES:
             raise ValueError(f"Неизвестный режим: {fix_mode}")
 
@@ -249,7 +253,9 @@ class VizitkaService:
         )
 
         if fix_mode != "as_is":
-            working, rgb_ok, bleed_ok = self._apply_fix_pipeline(working, state.order, fix_mode)
+            working, rgb_ok, bleed_ok = self._apply_fix_pipeline(
+                working, state.order, fix_mode, convert_cmyk=convert_cmyk
+            )
             state.rgb_converted = rgb_ok
             state.bleed_applied = bleed_ok
         else:
@@ -268,7 +274,9 @@ class VizitkaService:
             not b.has_bleed or not b.size_ok for b in dims_before_pf
         )
         state.approved = False
-        state.preview_ready = self._generate_previews(session_id, working, len(dims_after_pf))
+        state.preview_ready = self._generate_previews(
+            session_id, working, len(dims_after_pf), state.order
+        )
         self._save_meta(state)
         return state
 
@@ -288,13 +296,31 @@ class VizitkaService:
         return self._load_meta(session_id)
 
     def _apply_fix_pipeline(
-        self, pdf: Path, order: OrderConfig, fix_mode: str
+        self,
+        pdf: Path,
+        order: OrderConfig,
+        fix_mode: str,
+        *,
+        convert_cmyk: bool = True,
     ) -> tuple[Path, bool, bool]:
         rgb_ok = False
         bleed_ok = False
 
         if self.callas:
-            pdf, rgb_ok, bleed_ok = self._apply_callas_pipeline(pdf, order, fix_mode)
+            pdf, rgb_ok, bleed_ok = self._apply_callas_pipeline(
+                pdf, order, fix_mode, convert_cmyk=convert_cmyk
+            )
+
+        if fix_mode == "white_margins" and not bleed_ok:
+            tmp = pdf.parent / "step_white.pdf"
+            try:
+                apply_white_margins_pdf(str(pdf), str(tmp), margin_mm=order.bleed_mm)
+                if tmp.is_file():
+                    shutil.copy2(tmp, pdf)
+                    bleed_ok = True
+                    logger.info("белые поля внутри TrimBox (%.1f мм)", order.bleed_mm)
+            except Exception as e:
+                logger.warning("white margins: %s", e)
 
         if not bleed_ok and fix_mode in ("stretch", "stretch_strong", "white_margins"):
             tmp = pdf.parent / "step_boxes.pdf"
@@ -317,13 +343,26 @@ class VizitkaService:
         return pdf, rgb_ok, bleed_ok
 
     def _apply_callas_pipeline(
-        self, pdf: Path, order: OrderConfig, fix_mode: str
+        self,
+        pdf: Path,
+        order: OrderConfig,
+        fix_mode: str,
+        *,
+        convert_cmyk: bool = True,
     ) -> tuple[Path, bool, bool]:
         assert self.callas is not None
         current = pdf
         rgb_ok = False
         bleed_ok = False
         b = order.bleed_mm
+        bleed_vars = {
+            "Bleed_mm": b,
+            "bleed_mm": b,
+            "Add_mm_left": b,
+            "Add_mm_right": b,
+            "Add_mm_top": b,
+            "Add_mm_bottom": b,
+        }
 
         if fix_mode == "stretch":
             profile = self.callas.find_profile(
@@ -332,7 +371,9 @@ class VizitkaService:
             )
             if profile:
                 out = pdf.parent / "step_bleed.pdf"
-                res = self.callas.run_profile(profile, current, output=out)
+                res = self.callas.run_profile(
+                    profile, current, output=out, variables=bleed_vars
+                )
                 if res.ok and out.is_file():
                     current = out
                     bleed_ok = True
@@ -345,7 +386,9 @@ class VizitkaService:
             )
             if profile:
                 out = pdf.parent / "step_bleed.pdf"
-                res = self.callas.run_profile(profile, current, output=out)
+                res = self.callas.run_profile(
+                    profile, current, output=out, variables=bleed_vars
+                )
                 if res.ok and out.is_file():
                     current = out
                     bleed_ok = True
@@ -353,36 +396,34 @@ class VizitkaService:
                 profile = self.callas.find_profile("Generate bleed at page edges.kfpx")
                 if profile:
                     out = pdf.parent / "step_bleed.pdf"
-                    self.callas.run_profile(profile, current, output=out)
-                    if out.is_file():
+                    res = self.callas.run_profile(
+                        profile, current, output=out, variables=bleed_vars
+                    )
+                    if res.ok and out.is_file():
                         current = out
                         bleed_ok = True
 
         elif fix_mode == "white_margins":
-            profile = self.callas.find_profile("Enlarge page at edges.kfpx")
-            if profile:
-                out = pdf.parent / "step_enlarge.pdf"
-                vars_ = {
-                    "Add_mm_left": b,
-                    "Add_mm_right": b,
-                    "Add_mm_top": b,
-                    "Add_mm_bottom": b,
-                }
-                res = self.callas.run_profile(profile, current, output=out, variables=vars_)
+            tmp = pdf.parent / "step_white.pdf"
+            try:
+                apply_white_margins_pdf(str(current), str(tmp), margin_mm=b)
+                if tmp.is_file():
+                    current = tmp
+                    bleed_ok = True
+            except Exception as e:
+                logger.warning("white margins: %s", e)
+
+        if convert_cmyk:
+            cmyk = self.callas.find_profile(
+                "Convert to CMYK only (ISO Coated v2 (ECI)).kfpx",
+                "*CMYK*ISO Coated v2*",
+            )
+            if cmyk:
+                out = pdf.parent / "step_cmyk.pdf"
+                res = self.callas.run_profile(cmyk, current, output=out)
                 if res.ok and out.is_file():
                     current = out
-                    bleed_ok = True
-
-        cmyk = self.callas.find_profile(
-            "Convert to CMYK only (ISO Coated v2 (ECI)).kfpx",
-            "*CMYK*ISO Coated v2*",
-        )
-        if cmyk:
-            out = pdf.parent / "step_cmyk.pdf"
-            res = self.callas.run_profile(cmyk, current, output=out)
-            if res.ok and out.is_file():
-                current = out
-                rgb_ok = True
+                    rgb_ok = True
 
         final = pdf.parent / "working.pdf"
         if current.resolve() != final.resolve():
@@ -481,36 +522,73 @@ class VizitkaService:
 
     def ensure_preview(self, session_id: str, page: int, markup: bool = False) -> Path:
         path = self.preview_path(session_id, page, markup)
-        if path.is_file() and path.stat().st_size > 500:
-            return path
         pdf = self.working_pdf(session_id)
-        count = len(analyze_pdf(pdf, target_w_mm=90, target_h_mm=50))
-        self._generate_previews(session_id, pdf, count)
+        pdf_mtime = pdf.stat().st_mtime if pdf.is_file() else 0
+        if path.is_file() and path.stat().st_size > 500 and path.stat().st_mtime >= pdf_mtime:
+            return path
+        state = self._load_meta(session_id)
+        count = len(
+            analyze_pdf(pdf, target_w_mm=state.order.width_mm, target_h_mm=state.order.height_mm)
+        )
+        self._generate_previews(session_id, pdf, count, state.order)
         return path
 
-    def _generate_previews(self, session_id: str, pdf: Path, page_count: int) -> bool:
-        from app.preview import render_pdf_preview
+    def _generate_previews(
+        self, session_id: str, pdf: Path, page_count: int, order: OrderConfig
+    ) -> bool:
+        from app.preview import render_markup_preview, render_pdf_preview
 
         sdir = self._session_dir(session_id)
         all_ok = True
         for p in range(1, page_count + 1):
             plain = sdir / f"preview_p{p}_plain.png"
             markup = sdir / f"preview_p{p}_markup.png"
-            ok = False
+            plain.unlink(missing_ok=True)
+            markup.unlink(missing_ok=True)
+            plain_ok = False
+            markup_ok = False
 
             if self.callas:
                 try:
-                    self.callas.save_preview(pdf, plain, page=p, pagebox="MEDIABOX", width=900, height=500)
-                    ok = plain.is_file() and plain.stat().st_size > 500
+                    self.callas.save_preview(
+                        pdf, plain, page=p, pagebox="TRIMBOX", width=900, height=500
+                    )
+                    plain_ok = plain.is_file() and plain.stat().st_size > 500
                 except CallasError as e:
-                    logger.warning("callas preview p%s: %s", p, e)
+                    logger.warning("callas plain preview p%s: %s", p, e)
 
-            if not ok:
-                ok = render_pdf_preview(pdf, p, plain, max_width=900, max_height=500)
+            if not plain_ok:
+                plain_ok = render_pdf_preview(
+                    pdf, p, plain, max_width=900, max_height=500, pagebox="trimbox"
+                )
 
-            if ok:
+            if self.callas:
+                try:
+                    self.callas.save_safety_preview(
+                        pdf,
+                        markup,
+                        page=p,
+                        safe_mm=order.safe_mm,
+                        use_bleed=True,
+                        width=900,
+                        height=500,
+                    )
+                    markup_ok = markup.is_file() and markup.stat().st_size > 500
+                except CallasError as e:
+                    logger.warning("callas markup preview p%s: %s", p, e)
+
+            if not markup_ok:
+                markup_ok = render_markup_preview(
+                    pdf, p, markup, safe_mm=order.safe_mm, max_width=900, max_height=500
+                )
+
+            if not plain_ok and markup_ok:
+                shutil.copy2(markup, plain)
+                plain_ok = True
+            if plain_ok and not markup_ok:
                 shutil.copy2(plain, markup)
-            else:
+
+            if not (plain_ok and markup_ok):
                 all_ok = False
                 logger.error("не удалось создать превью стр.%s для %s", p, pdf)
 
