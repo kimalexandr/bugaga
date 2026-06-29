@@ -119,6 +119,7 @@
     .legend .red { color: #f44336; }
     .consent-text { font-size: 0.9rem; line-height: 1.6; margin-bottom: 16px; }
     .hidden { display: none !important; }
+    .preview-box.loading img { opacity: 0.35; filter: grayscale(30%); }
     .loading { opacity: 0.6; pointer-events: none; }
     input[type="file"] { display: none; }
     .approve-check { margin: 16px 0; font-size: 0.85rem; }
@@ -254,6 +255,7 @@
             <label class="radio-opt"><input type="radio" name="fixMode" value="stretch_strong" /> Сильно растянуть края</label>
             <label class="radio-opt"><input type="radio" name="fixMode" value="white_margins" /> Добавить белые поля</label>
           </div>
+          <div class="legend" id="fixHint" style="margin-top:12px;font-size:0.8rem;color:var(--muted)"></div>
           <div class="legend">
             <p style="color:#c62828">Внимание! Элементы за красной рамкой могут обрезаться.</p>
           </div>
@@ -292,6 +294,9 @@
     const btnNext = document.getElementById("btnNext");
     const errorBanner = document.getElementById("errorBanner");
 
+    let fixModeOnOpen = "stretch";
+    let fixPreviewAbort = null;
+
     function init() {
       renderSteps();
       initQty();
@@ -301,7 +306,14 @@
       btnNext.addEventListener("click", onNext);
       document.getElementById("pdfInput").addEventListener("change", onFileSelect);
       document.getElementById("fixOk").addEventListener("click", applyFix);
-      document.getElementById("fixCancel").addEventListener("click", () => closeModal("fixModal"));
+      document.getElementById("fixCancel").addEventListener("click", onFixCancel);
+      document.querySelectorAll('input[name="fixMode"]').forEach(r => {
+        r.addEventListener("change", () => {
+          if (document.getElementById("fixModal").classList.contains("open")) {
+            previewFixMode(r.value);
+          }
+        });
+      });
       document.getElementById("consentAgree").addEventListener("click", onConsentAgree);
       document.getElementById("consentStay").addEventListener("click", () => closeModal("consentModal"));
       document.getElementById("markupPreview").addEventListener("click", flipPreview);
@@ -330,9 +342,20 @@
     function goStep(n) {
       if (n < 1 || n > 6) return;
       step = n;
-      if (step === 4 && session) showPreview("markup");
-      if (step === 5 && session) showPreview("plain");
+      if (step === 4 && session) {
+        refreshSession().then(() => showPreview("markup"));
+      } else if (step === 5 && session) {
+        refreshSession().then(() => showPreview("plain"));
+      }
       renderSteps();
+    }
+
+    async function refreshSession() {
+      if (!session?.session_id) return;
+      try {
+        const res = await fetch(`/api/vizitka/${session.session_id}`);
+        if (res.ok) session = await res.json();
+      } catch (_) { /* оставляем текущую сессию */ }
     }
 
     function initQty() {
@@ -433,8 +456,27 @@
     }
 
     function previewSrc(p, markup) {
-      if (markup) return p.preview_markup_b64 || p.preview_markup;
-      return p.preview_plain_b64 || p.preview_plain;
+      if (markup) return p.preview_markup_b64 || p.preview_markup || "";
+      return p.preview_plain_b64 || p.preview_plain || "";
+    }
+
+    /** data: URL нельзя дополнять query-string — иначе картинка не грузится */
+    function withCacheBust(src) {
+      if (!src || src.startsWith("data:")) return src;
+      const sep = src.includes("?") ? "&" : "?";
+      return `${src}${sep}t=${Date.now()}`;
+    }
+
+    function setImgSrc(img, src) {
+      if (!src) {
+        img.removeAttribute("src");
+        return;
+      }
+      img.src = withCacheBust(src);
+    }
+
+    function escapeAttr(s) {
+      return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
     }
 
     function renderPreflight(data) {
@@ -452,7 +494,7 @@
         <div class="page-card">
           <h4>${p.label} — ${p.width_mm}×${p.height_mm} мм</h4>
           <div class="page-inner">
-            <div class="thumb"><img src="${previewSrc(p, false)}" alt="стр.${p.page}" /></div>
+            <div class="thumb"><img src="${escapeAttr(withCacheBust(previewSrc(p, false)))}" alt="стр.${p.page}" /></div>
             <div class="messages">
               ${p.messages.map(m => `<div class="msg ${m.level === "ok" ? "ok" : m.level === "error" ? "err" : "warn"}">${m.text}</div>`).join("")}
               ${p.needs_fix ? `<button type="button" class="btn btn-orange fix-btn" data-page="${p.page}">Исправить</button>` : ""}
@@ -465,18 +507,79 @@
       });
     }
 
+    function updateFixHint(pageData) {
+      const el = document.getElementById("fixHint");
+      if (!pageData) { el.textContent = ""; return; }
+      const pf = pageData.preflight || {};
+      const bleed = pf.bleed_margin_mm != null ? `${pf.bleed_margin_mm} мм` : "—";
+      el.textContent = `Размер: ${pageData.width_mm}×${pageData.height_mm} мм · вылет от реза: ${bleed}`;
+    }
+
     function openFixModal(page) {
       previewPage = page;
+      fixModeOnOpen = session.fix_mode || "stretch";
+      const radio = document.querySelector(`input[name="fixMode"][value="${fixModeOnOpen}"]`);
+      if (radio) radio.checked = true;
       const p = session.pages.find(x => x.page === page);
-      if (p) document.getElementById("fixPreviewImg").src = previewSrc(p, false);
+      if (p) {
+        setImgSrc(document.getElementById("fixPreviewImg"), previewSrc(p, false));
+        updateFixHint(p);
+      }
       document.getElementById("fixModal").classList.add("open");
     }
 
     function closeModal(id) { document.getElementById(id).classList.remove("open"); }
 
+    async function previewFixMode(mode) {
+      if (!session?.session_id) return;
+      if (fixPreviewAbort) fixPreviewAbort.abort();
+      fixPreviewAbort = new AbortController();
+      const box = document.querySelector("#fixModal .preview-box");
+      const img = document.getElementById("fixPreviewImg");
+      box.classList.add("loading");
+      const fd = new FormData();
+      fd.append("fix_mode", mode);
+      try {
+        const res = await fetch(`/api/vizitka/${session.session_id}/fix`, {
+          method: "POST",
+          body: fd,
+          signal: fixPreviewAbort.signal,
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || res.statusText);
+        session = data;
+        const p = data.pages.find(x => x.page === previewPage) || data.pages[0];
+        if (p) {
+          setImgSrc(img, previewSrc(p, false));
+          updateFixHint(p);
+        }
+      } catch (err) {
+        if (err.name !== "AbortError") showError(err.message);
+      } finally {
+        box.classList.remove("loading");
+        fixPreviewAbort = null;
+      }
+    }
+
+    async function onFixCancel() {
+      closeModal("fixModal");
+      const selected = document.querySelector('input[name="fixMode"]:checked')?.value;
+      if (selected && selected !== fixModeOnOpen) {
+        await previewFixMode(fixModeOnOpen);
+        renderPreflight(session);
+      }
+    }
+
     async function applyFix() {
+      if (fixPreviewAbort) fixPreviewAbort.abort();
       const mode = document.querySelector('input[name="fixMode"]:checked')?.value || "stretch";
       closeModal("fixModal");
+      fixModeOnOpen = mode;
+      if (session?.fix_mode === mode) {
+        renderPreflight(session);
+        if (session.needs_consent) showConsentModal(session);
+        return;
+      }
       const fd = new FormData();
       fd.append("fix_mode", mode);
       document.querySelector(".wizard").classList.add("loading");
@@ -510,7 +613,7 @@
       const p = session.pages.find(x => x.page === previewPage) || session.pages[0];
       const src = previewSrc(p, kind === "markup");
       const img = kind === "markup" ? document.getElementById("markupImg") : document.getElementById("plainImg");
-      img.src = src + "?t=" + Date.now();
+      setImgSrc(img, src);
     }
 
     function flipPreview() {

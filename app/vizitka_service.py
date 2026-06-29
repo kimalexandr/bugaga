@@ -298,12 +298,19 @@ class VizitkaService:
 
         if not bleed_ok and fix_mode in ("stretch", "stretch_strong", "white_margins"):
             tmp = pdf.parent / "step_boxes.pdf"
+            bleed_amount = order.bleed_mm
+            if fix_mode == "stretch_strong":
+                bleed_amount = order.bleed_mm * 2
             try:
-                adjust_bleed_pdf(str(pdf), str(tmp), order.bleed_mm, add_crop_marks=False)
+                adjust_bleed_pdf(str(pdf), str(tmp), bleed_amount, add_crop_marks=False)
                 if tmp.is_file():
                     shutil.copy2(tmp, pdf)
                     bleed_ok = True
-                    logger.info("вылеты через pikepdf (боксы, без растяжения контента)")
+                    logger.info(
+                        "вылеты через pikepdf (%.1f мм, режим %s)",
+                        bleed_amount,
+                        fix_mode,
+                    )
             except Exception as e:
                 logger.warning("pikepdf bleed: %s", e)
 
