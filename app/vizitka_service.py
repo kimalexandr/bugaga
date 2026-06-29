@@ -89,6 +89,7 @@ class SessionState:
     needs_consent: bool = False
     rgb_converted: bool = False
     bleed_applied: bool = False
+    cmyk_pending: bool = False
     approved: bool = False
     preview_ready: bool = False
     pages: list[PageResult] = field(default_factory=list)
@@ -104,6 +105,7 @@ class SessionState:
             "needs_consent": self.needs_consent,
             "rgb_converted": self.rgb_converted,
             "bleed_applied": self.bleed_applied,
+            "cmyk_pending": self.cmyk_pending,
             "approved": self.approved,
             "preview_ready": self.preview_ready,
             "pages": [p.to_dict() for p in self.pages],
@@ -150,6 +152,7 @@ class VizitkaService:
             needs_consent=data.get("needs_consent", False),
             rgb_converted=data.get("rgb_converted", False),
             bleed_applied=data.get("bleed_applied", False),
+            cmyk_pending=data.get("cmyk_pending", False),
             approved=data.get("approved", False),
             preview_ready=data.get("preview_ready", False),
             pages=pages,
@@ -211,9 +214,11 @@ class VizitkaService:
             )
             state.rgb_converted = rgb_ok
             state.bleed_applied = bleed_ok
+            state.cmyk_pending = False
         else:
             state.rgb_converted = False
             state.bleed_applied = False
+            state.cmyk_pending = False
 
         dims_after_pf = analyze_pdf(
             working,
@@ -258,9 +263,11 @@ class VizitkaService:
             )
             state.rgb_converted = rgb_ok
             state.bleed_applied = bleed_ok
+            state.cmyk_pending = fix_mode != "as_is" and not convert_cmyk
         else:
             state.rgb_converted = False
             state.bleed_applied = False
+            state.cmyk_pending = False
 
         dims_after_pf = analyze_pdf(
             working,
@@ -472,8 +479,15 @@ class VizitkaService:
                     messages.append(
                         PageMessage(
                             "ok",
-                            "Автоматически исправлено: RGB → CMYK (Callas)",
+                            "Автоматически исправлено: RGB → CMYK (Callas, ISO Coated v2)",
                             auto_fixed=True,
+                        )
+                    )
+                elif state.cmyk_pending:
+                    messages.append(
+                        PageMessage(
+                            "warning",
+                            "Превью: CMYK ещё не применён — нажмите OK для финальной обработки файла.",
                         )
                     )
                 elif b.has_rgb and not a.has_rgb:

@@ -257,6 +257,7 @@
             <label class="radio-opt"><input type="radio" name="fixMode" value="white_margins" /> Добавить белые поля</label>
           </div>
           <div class="legend" id="fixHint" style="margin-top:12px;font-size:0.8rem;color:var(--muted)"></div>
+          <div id="fixMessages" style="margin-top:10px;font-size:0.82rem"></div>
           <div class="legend">
             <p style="color:#c62828">Внимание! Элементы за красной рамкой могут обрезаться.</p>
           </div>
@@ -510,10 +511,44 @@
 
     function updateFixHint(pageData) {
       const el = document.getElementById("fixHint");
-      if (!pageData) { el.textContent = ""; return; }
+      const msgEl = document.getElementById("fixMessages");
+      if (!pageData) {
+        el.textContent = "";
+        if (msgEl) msgEl.innerHTML = "";
+        return;
+      }
       const pf = pageData.preflight || {};
+      const order = session?.order || {};
       const bleed = pf.bleed_margin_mm != null ? `${pf.bleed_margin_mm} мм` : "—";
-      el.textContent = `Размер: ${pageData.width_mm}×${pageData.height_mm} мм · вылет от реза: ${bleed}`;
+      const proc = session?.processing || {};
+      const lines = [
+        `Файл: ${proc.working_pdf || "working.pdf"} — превью из обработанного PDF`,
+        `TrimBox в файле: ${pageData.width_mm}×${pageData.height_mm} мм · заказ: ${order.width_mm || "?"}×${order.height_mm || "?"} мм`,
+        `Вылет от реза: ${bleed}`,
+      ];
+      if (proc.callas) {
+        lines.push(proc.bleed_applied ? "Callas: вылеты применены к файлу" : "Callas: вылеты не изменили файл (fallback pikepdf)");
+      } else {
+        lines.push("Callas недоступен — только проверка боксов PDF");
+      }
+      if (proc.rgb_converted) {
+        lines.push("CMYK: RGB переведён в CMYK (Callas, ISO Coated v2)");
+      } else if (proc.cmyk_pending) {
+        lines.push("CMYK: будет применён после нажатия OK (сейчас только превью вылетов)");
+      } else if (pf.has_rgb) {
+        lines.push("CMYK: в макете есть RGB — конвертация не выполнена");
+      } else {
+        lines.push("CMYK: RGB не обнаружен в PDF");
+      }
+      el.innerHTML = lines.map(t => `<div>${t}</div>`).join("");
+      if (msgEl) {
+        const relevant = (pageData.messages || []).filter(m =>
+          /rgb|cmyk|вылет|обработк|размер/i.test(m.text)
+        );
+        msgEl.innerHTML = relevant.length
+          ? relevant.map(m => `<div class="msg ${m.level === "ok" ? "ok" : m.level === "error" ? "err" : "warn"}" style="margin-bottom:6px">${m.text}</div>`).join("")
+          : "";
+      }
     }
 
     function openFixModal(page) {

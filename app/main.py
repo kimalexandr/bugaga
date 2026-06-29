@@ -207,6 +207,16 @@ def _enrich_response(state) -> dict:
                 logging.warning("preview b64 p%s: %s", n, e)
     data["callas_available"] = _get_callas() is not None
     data["preview_ready"] = getattr(state, "preview_ready", False)
+    working = svc.working_pdf(sid)
+    data["processing"] = {
+        "uses_real_pdf": working.is_file(),
+        "working_pdf": working.name if working.is_file() else None,
+        "callas": data["callas_available"],
+        "bleed_applied": state.bleed_applied,
+        "rgb_converted": state.rgb_converted,
+        "cmyk_pending": state.cmyk_pending,
+        "fix_mode": state.fix_mode,
+    }
     data["can_proceed"] = not state.needs_consent and all(
         not any(m["level"] == "error" for m in p["messages"]) for p in data["pages"]
     )
