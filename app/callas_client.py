@@ -21,14 +21,14 @@ DEFAULT_TIMEOUT = int(os.getenv("CALLAS_TIMEOUT", "180"))
 
 
 def _lang_args(home: Path) -> list[str]:
-    """ru.bin часто отсутствует в CLI-сборке — без файла Callas падает с exit 101."""
+    """Язык CLI: -l=en (не --language — не все подкоманды его принимают)."""
     override = os.getenv("CALLAS_LANGUAGE", "").strip()
     if override:
-        return [f"--language={override}"]
+        return [f"-l={override}"]
     if (home / "lang" / "pdfToolbox.ru.bin").is_file():
-        return ["--language=ru"]
+        return ["-l=ru"]
     if (home / "lang" / "pdfToolbox.en.bin").is_file():
-        return ["--language=en"]
+        return ["-l=en"]
     return []
 
 

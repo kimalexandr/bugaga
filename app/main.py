@@ -63,6 +63,16 @@ async def bleed_page():
     return FileResponse(page, media_type="text/html; charset=utf-8")
 
 
+def _is_pdf_upload(file: UploadFile) -> bool:
+    ct = (file.content_type or "").lower()
+    if ct in ("application/pdf", "application/x-pdf"):
+        return True
+    if ct in ("application/octet-stream", "binary/octet-stream", ""):
+        name = (file.filename or "").lower()
+        return name.endswith(".pdf")
+    return False
+
+
 @app.post("/api/vizitka/upload")
 async def vizitka_upload(
     file: UploadFile = File(...),
@@ -75,7 +85,7 @@ async def vizitka_upload(
     safe_mm: float = Form(2.0),
     fix_mode: str = Form("stretch"),
 ):
-    if file.content_type != "application/pdf":
+    if not _is_pdf_upload(file):
         raise HTTPException(400, "Разрешены только PDF")
 
     content = await file.read()
@@ -93,12 +103,14 @@ async def vizitka_upload(
     )
 
     try:
+        logging.info("upload start: %s (%s bytes)", file.filename, len(content))
         state = _get_vizitka().process_upload(
             content,
             file.filename or "maket.pdf",
             order,
             fix_mode=fix_mode,
         )
+        logging.info("upload done: session %s", state.session_id)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     except Exception as e:
@@ -189,7 +201,9 @@ async def vizitka_download(session_id: str):
     )
 
 
-def _enrich_response(state) -> dict:
+def _enrich_response(state, *, embed_b64: bool | None = None) -> dict:
+    if embed_b64 is None:
+        embed_b64 = os.getenv("PREVIEW_EMBED_B64", "0").lower() in ("1", "true", "yes")
     data = state.to_dict()
     sid = state.session_id
     svc = _get_vizitka()
@@ -197,14 +211,15 @@ def _enrich_response(state) -> dict:
         n = p["page"]
         p["preview_plain"] = f"/api/vizitka/{sid}/preview/{n}?markup=0"
         p["preview_markup"] = f"/api/vizitka/{sid}/preview/{n}?markup=1"
-        for key, markup in (("preview_plain_b64", False), ("preview_markup_b64", True)):
-            try:
-                path = svc.ensure_preview(sid, n, markup)
-                if path.is_file() and path.stat().st_size > 500:
-                    b64 = base64.b64encode(path.read_bytes()).decode("ascii")
-                    p[key] = f"data:image/png;base64,{b64}"
-            except (FileNotFoundError, OSError) as e:
-                logging.warning("preview b64 p%s: %s", n, e)
+        if embed_b64:
+            for key, markup in (("preview_plain_b64", False), ("preview_markup_b64", True)):
+                try:
+                    path = svc.ensure_preview(sid, n, markup)
+                    if path.is_file() and path.stat().st_size > 500:
+                        b64 = base64.b64encode(path.read_bytes()).decode("ascii")
+                        p[key] = f"data:image/png;base64,{b64}"
+                except (FileNotFoundError, OSError) as e:
+                    logging.warning("preview b64 p%s: %s", n, e)
     data["callas_available"] = _get_callas() is not None
     data["preview_ready"] = getattr(state, "preview_ready", False)
     working = svc.working_pdf(sid)

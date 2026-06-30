@@ -356,7 +356,7 @@
       if (!session?.session_id) return;
       try {
         const res = await fetch(`/api/vizitka/${session.session_id}`);
-        if (res.ok) session = await res.json();
+        if (res.ok) session = await parseJsonResponse(res);
       } catch (_) { /* оставляем текущую сессию */ }
     }
 
@@ -426,6 +426,25 @@
       errorBanner.classList.toggle("hidden", !msg);
     }
 
+    async function parseJsonResponse(res) {
+      const text = await res.text();
+      if (!text) {
+        throw new Error(res.ok ? "Пустой ответ сервера" : `Ошибка ${res.status}: ${res.statusText}`);
+      }
+      if (text.trimStart().startsWith("<")) {
+        throw new Error(
+          `Сервер вернул HTML вместо JSON (${res.status}). ` +
+          "Откройте сайт на порту 8000 или увеличьте timeout nginx (CMYK ~30–60 с). " +
+          "Логи: docker compose logs web --tail 30"
+        );
+      }
+      try {
+        return JSON.parse(text);
+      } catch (e) {
+        throw new Error(`Некорректный JSON (${res.status}): ${text.slice(0, 120)}`);
+      }
+    }
+
     async function onFileSelect(e) {
       const file = e.target.files[0];
       if (!file) return;
@@ -444,7 +463,7 @@
       document.querySelector(".wizard").classList.add("loading");
       try {
         const res = await fetch("/api/vizitka/upload", { method: "POST", body: fd });
-        const data = await res.json();
+        const data = await parseJsonResponse(res);
         if (!res.ok) throw new Error(data.detail || res.statusText);
         session = data;
         renderPreflight(data);
@@ -582,7 +601,7 @@
           body: fd,
           signal: fixPreviewAbort.signal,
         });
-        const data = await res.json();
+        const data = await parseJsonResponse(res);
         if (!res.ok) throw new Error(data.detail || res.statusText);
         session = data;
         const p = data.pages.find(x => x.page === previewPage) || data.pages[0];
@@ -617,7 +636,7 @@
       document.querySelector(".wizard").classList.add("loading");
       try {
         const res = await fetch(`/api/vizitka/${session.session_id}/fix`, { method: "POST", body: fd });
-        const data = await res.json();
+        const data = await parseJsonResponse(res);
         if (!res.ok) throw new Error(data.detail || res.statusText);
         session = data;
         renderPreflight(data);
@@ -639,7 +658,7 @@
     async function onConsentAgree() {
       closeModal("consentModal");
       const res = await fetch(`/api/vizitka/${session.session_id}/consent`, { method: "POST" });
-      session = await res.json();
+      session = await parseJsonResponse(res);
     }
 
     function showPreview(kind) {
@@ -662,7 +681,7 @@
       const fd = new FormData();
       fd.append("approved", approved ? "1" : "0");
       const res = await fetch(`/api/vizitka/${session.session_id}/approve`, { method: "POST", body: fd });
-      session = await res.json();
+      session = await parseJsonResponse(res);
       btnNext.disabled = !approved;
     }
 

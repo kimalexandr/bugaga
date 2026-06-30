@@ -62,7 +62,6 @@ echo "Профиль: $CMYK_PATH"
 set +e
 docker compose exec -T -w /opt/callas web ./pdfToolbox \
   --cachefolder=/var/callas-license \
-  --language=en \
   -o=/tmp/test_cmyk.pdf \
   "$CMYK_PATH" \
   "$WORKING" 2>&1
