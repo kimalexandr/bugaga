@@ -80,6 +80,10 @@ docker compose logs web --tail 80 2>/dev/null | grep -i cmyk || echo "(нет с
 echo
 case "$EXIT" in
   0|1|2|5|6|7|8) echo "Код $EXIT — профиль отработал (возможны предупреждения)." ;;
-  101) echo "Код 101 — см. текст ошибки выше (часто: нет pdfToolbox.ru.bin — уберите --language=ru)." ;;
+  100|101)
+    echo "Код $EXIT — ошибка Callas, см. вывод выше."
+    echo "  1008 / Not activated — нет лицензии pdfToolbox CLI (нужна активация на сервере)."
+    echo "  1002 — нет языкового файла (задайте CALLAS_LANGUAGE=en)."
+    ;;
   *) echo "Код $EXIT — ошибка Callas, см. вывод выше." ;;
 esac

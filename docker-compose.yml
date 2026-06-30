@@ -8,6 +8,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - CALLAS_HOME=/opt/callas
+      - CALLAS_LANGUAGE=en
       - VIZITKA_SESSION_DIR=/tmp/vizitka-sessions
     volumes:
       - ./logs:/app/logs

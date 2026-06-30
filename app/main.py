@@ -281,7 +281,7 @@ def health():
             profiles = {}
     callas_home = os.getenv("CALLAS_HOME", "/opt/pdftoolbox/callas_pdfToolboxCLI_x64_Linux_17-0-682")
     lang_home = Path(callas_home)
-    return {
+    data: dict = {
         "status": "ok",
         "service": "pdf-bleed-adjuster",
         "callas": callas is not None,
@@ -292,3 +292,19 @@ def health():
         "profiles": profiles,
         "profiles_ok": bool(profiles.get("bleed_edges") and profiles.get("cmyk")),
     }
+    if callas and os.getenv("CALLAS_LICENSE_PROBE", "").lower() in ("1", "true", "yes"):
+        probe_pdf = Path(os.getenv("CALLAS_LICENSE_PROBE_PDF", ""))
+        if not probe_pdf.is_file():
+            sessions = Path(os.getenv("VIZITKA_SESSION_DIR", "/tmp/vizitka-sessions"))
+            if sessions.is_dir():
+                for sdir in sorted(sessions.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+                    candidate = sdir / "working.pdf"
+                    if candidate.is_file():
+                        probe_pdf = candidate
+                        break
+        try:
+            lic = callas.license_probe(probe_pdf if probe_pdf.is_file() else None)
+            data["callas_license"] = lic
+        except CallasError as e:
+            data["callas_license"] = {"licensed": False, "detail": str(e)}
+    return data

@@ -116,6 +116,25 @@ class CallasClient:
         }
         return {k: (str(v.relative_to(profiles)) if v else None) for k, v in checks.items()}
 
+    def license_probe(self, pdf: Path | None = None) -> dict[str, str | bool]:
+        """Проверка лицензии через запуск CMYK-профиля (exit 1008 = нет лицензии)."""
+        profile = self.find_profile(
+            "Convert to CMYK only (ISO Coated v2 (ECI)).kfpx", "*CMYK*ISO Coated v2*"
+        )
+        if not profile:
+            return {"licensed": False, "detail": "профиль CMYK не найден"}
+        if pdf is None or not pdf.is_file():
+            return {"licensed": None, "detail": "нужен PDF для проверки (загрузите макет)"}
+        out = pdf.parent / "_license_probe.pdf"
+        res = self.run_profile(profile, pdf, output=out)
+        text = (res.stderr or res.stdout or "").lower()
+        if res.returncode == 100 or "1008" in text or "no license" in text or "not activated" in text:
+            return {"licensed": False, "detail": "Not activated (no license), exit=%s" % res.returncode}
+        if res.ok and out.is_file():
+            out.unlink(missing_ok=True)
+            return {"licensed": True, "detail": "ok"}
+        return {"licensed": False, "detail": (res.stderr or res.stdout or "")[:200] or f"exit={res.returncode}"}
+
     def quick_info(self, pdf: Path) -> str:
         code, out, err = self._run(["--quickpdfinfo", str(pdf)])
         if code >= 100:
