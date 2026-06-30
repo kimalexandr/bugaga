@@ -84,6 +84,22 @@ class CallasClient:
                         return path
         return None
 
+    def list_key_profiles(self) -> dict[str, str | None]:
+        """Проверка наличия ключевых профилей (CLI может быть ok, а профилей — нет)."""
+        checks = {
+            "bleed_edges": self.find_profile(
+                "Generate bleed at page edges.kfpx", "*Generate*bleed*edges*"
+            ),
+            "bleed_upscale": self.find_profile(
+                "Generate bleed by upscaling.kfpx", "*upscal*bleed*"
+            ),
+            "cmyk": self.find_profile(
+                "Convert to CMYK only (ISO Coated v2 (ECI)).kfpx", "*CMYK*ISO Coated v2*"
+            ),
+            "preflight": self.find_profile("Check and fix bleed.kfpx", "*Check*bleed*"),
+        }
+        return {k: (str(v.name) if v else None) for k, v in checks.items()}
+
     def quick_info(self, pdf: Path) -> str:
         code, out, err = self._run(["--quickpdfinfo", str(pdf)])
         if code >= 100:

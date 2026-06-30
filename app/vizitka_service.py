@@ -229,7 +229,10 @@ class VizitkaService:
         state.pages = self._build_page_results(dims_before_pf, dims_after_pf, order, state)
         state.processed = fix_mode != "as_is"
         state.needs_consent = state.processed and any(
-            not b.has_bleed or not b.size_ok for b in dims_before_pf
+            not a.has_bleed
+            or not a.size_ok
+            or (a.has_rgb and not state.rgb_converted and not state.cmyk_pending)
+            for a in dims_after_pf
         )
 
         preview_ok = self._generate_previews(session_id, working, len(dims_after_pf), order)
@@ -278,7 +281,10 @@ class VizitkaService:
         state.pages = self._build_page_results(dims_before_pf, dims_after_pf, state.order, state)
         state.processed = fix_mode != "as_is"
         state.needs_consent = state.processed and any(
-            not b.has_bleed or not b.size_ok for b in dims_before_pf
+            not a.has_bleed
+            or not a.size_ok
+            or (a.has_rgb and not state.rgb_converted and not state.cmyk_pending)
+            for a in dims_after_pf
         )
         state.approved = False
         state.preview_ready = self._generate_previews(
@@ -384,6 +390,15 @@ class VizitkaService:
                 if res.ok and out.is_file():
                     current = out
                     bleed_ok = True
+                else:
+                    logger.warning(
+                        "bleed профиль %s: exit=%s out=%s",
+                        profile.name,
+                        res.returncode,
+                        (res.stderr or res.stdout or "")[:500],
+                    )
+            else:
+                logger.warning("профиль bleed edges не найден в %s/var/Profiles", self.callas.home)
 
         elif fix_mode == "stretch_strong":
             profile = self.callas.find_profile(
@@ -431,6 +446,15 @@ class VizitkaService:
                 if res.ok and out.is_file():
                     current = out
                     rgb_ok = True
+                else:
+                    logger.warning(
+                        "CMYK профиль %s: exit=%s stderr=%s",
+                        cmyk.name,
+                        res.returncode,
+                        (res.stderr or res.stdout or "")[:500],
+                    )
+            else:
+                logger.warning("профиль CMYK не найден в %s/var/Profiles", self.callas.home)
 
         final = pdf.parent / "working.pdf"
         if current.resolve() != final.resolve():
@@ -451,7 +475,8 @@ class VizitkaService:
             page_num = i + 1
             messages: list[PageMessage] = []
 
-            for m in b.messages:
+            # Сообщения по состоянию ПОСЛЕ обработки (working.pdf), не по исходнику
+            for m in a.messages:
                 messages.append(PageMessage(m["level"], m["text"]))
 
             if state.fix_mode != "as_is":
@@ -471,9 +496,13 @@ class VizitkaService:
                     )
 
                 if a.has_bleed and not b.has_bleed:
-                    messages.append(PageMessage("ok", "Вылеты добавлены / расширены"))
-                elif a.has_bleed:
-                    messages.append(PageMessage("ok", "Вылеты OK"))
+                    messages.append(
+                        PageMessage(
+                            "ok",
+                            "Автоматически исправлено: вылеты добавлены",
+                            auto_fixed=True,
+                        )
+                    )
 
                 if state.rgb_converted:
                     messages.append(
@@ -490,15 +519,21 @@ class VizitkaService:
                             "Превью: CMYK ещё не применён — нажмите OK для финальной обработки файла.",
                         )
                     )
-                elif b.has_rgb and not a.has_rgb:
-                    messages.append(PageMessage("ok", "RGB-объекты не обнаружены после обработки"))
-                elif b.has_rgb and not state.rgb_converted:
-                    messages.append(
-                        PageMessage(
-                            "warning",
-                            "RGB остаётся — Callas CMYK недоступен или не сработал.",
+                elif a.has_rgb and not state.rgb_converted:
+                    if self.callas:
+                        messages.append(
+                            PageMessage(
+                                "warning",
+                                "RGB остаётся — профиль CMYK Callas не сработал (лицензия, путь или ошибка CLI).",
+                            )
                         )
-                    )
+                    else:
+                        messages.append(
+                            PageMessage(
+                                "warning",
+                                "RGB остаётся — Callas недоступен в контейнере (см. /health).",
+                            )
+                        )
 
             safe_warn = False
             if self.callas:

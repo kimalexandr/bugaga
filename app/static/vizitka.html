@@ -627,7 +627,9 @@
     }
 
     function showConsentModal(data) {
-      const lines = data.pages.flatMap(p => p.messages.filter(m => m.level === "warning").map(m => m.text));
+      const lines = [...new Set(
+        data.pages.flatMap(p => p.messages.filter(m => m.level === "warning").map(m => m.text))
+      )];
       document.getElementById("consentBody").innerHTML = lines.length
         ? lines.map(t => `<p>⚠️ ${t}</p>`).join("")
         : "<p>⚠️ Макет был автоматически обработан (вылеты / цвет).</p>";

@@ -273,9 +273,17 @@ async def adjust_bleed(
 @app.get("/health")
 def health():
     callas = _get_callas()
+    profiles: dict[str, str | None] = {}
+    if callas:
+        try:
+            profiles = callas.list_key_profiles()
+        except CallasError:
+            profiles = {}
     return {
         "status": "ok",
         "service": "pdf-bleed-adjuster",
         "callas": callas is not None,
         "callas_home": os.getenv("CALLAS_HOME", "/opt/pdftoolbox/callas_pdfToolboxCLI_x64_Linux_17-0-682"),
+        "profiles": profiles,
+        "profiles_ok": bool(profiles.get("bleed_edges") and profiles.get("cmyk")),
     }
