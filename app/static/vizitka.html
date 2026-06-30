@@ -445,6 +445,20 @@
       }
     }
 
+    async function pollSessionUntilReady(sessionId, maxMs = 180000) {
+      const t0 = Date.now();
+      while (Date.now() - t0 < maxMs) {
+        const res = await fetch(`/api/vizitka/${sessionId}`);
+        const data = await parseJsonResponse(res);
+        if (!res.ok) throw new Error(data.detail || res.statusText);
+        if (data.processing_error) throw new Error(data.processing_error);
+        if (!data.is_processing) return data;
+        showError("Обработка макета (вылеты, CMYK)… подождите.");
+        await new Promise(r => setTimeout(r, 2000));
+      }
+      throw new Error("Таймаут обработки на сервере. Проверьте: docker compose logs web --tail 30");
+    }
+
     async function onFileSelect(e) {
       const file = e.target.files[0];
       if (!file) return;
@@ -465,10 +479,11 @@
         const res = await fetch("/api/vizitka/upload", { method: "POST", body: fd });
         const data = await parseJsonResponse(res);
         if (!res.ok) throw new Error(data.detail || res.statusText);
-        session = data;
-        renderPreflight(data);
+        session = data.is_processing ? await pollSessionUntilReady(data.session_id) : data;
+        renderPreflight(session);
         btnNext.disabled = false;
-        if (data.needs_consent) showConsentModal(data);
+        showError("");
+        if (session.needs_consent) showConsentModal(session);
       } catch (err) {
         showError(err.message);
       } finally {

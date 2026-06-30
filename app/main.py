@@ -75,6 +75,7 @@ def _is_pdf_upload(file: UploadFile) -> bool:
 
 @app.post("/api/vizitka/upload")
 async def vizitka_upload(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     width_mm: float = Form(90.0),
     height_mm: float = Form(50.0),
@@ -104,13 +105,15 @@ async def vizitka_upload(
 
     try:
         logging.info("upload start: %s (%s bytes)", file.filename, len(content))
-        state = _get_vizitka().process_upload(
+        svc = _get_vizitka()
+        state = svc.begin_upload(
             content,
             file.filename or "maket.pdf",
             order,
             fix_mode=fix_mode,
         )
-        logging.info("upload done: session %s", state.session_id)
+        background_tasks.add_task(svc.finish_upload, state.session_id)
+        logging.info("upload accepted: session %s (background processing)", state.session_id)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     except Exception as e:
@@ -222,6 +225,8 @@ def _enrich_response(state, *, embed_b64: bool | None = None) -> dict:
                     logging.warning("preview b64 p%s: %s", n, e)
     data["callas_available"] = _get_callas() is not None
     data["preview_ready"] = getattr(state, "preview_ready", False)
+    data["is_processing"] = getattr(state, "processing", False)
+    data["processing_error"] = getattr(state, "processing_error", None)
     working = svc.working_pdf(sid)
     data["processing"] = {
         "uses_real_pdf": working.is_file(),
@@ -232,8 +237,10 @@ def _enrich_response(state, *, embed_b64: bool | None = None) -> dict:
         "cmyk_pending": state.cmyk_pending,
         "fix_mode": state.fix_mode,
     }
-    data["can_proceed"] = not state.needs_consent and all(
-        not any(m["level"] == "error" for m in p["messages"]) for p in data["pages"]
+    data["can_proceed"] = (
+        not getattr(state, "processing", False)
+        and not state.needs_consent
+        and all(not any(m["level"] == "error" for m in p["messages"]) for p in data["pages"])
     )
     return data
 

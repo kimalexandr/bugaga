@@ -92,6 +92,8 @@ class SessionState:
     cmyk_pending: bool = False
     approved: bool = False
     preview_ready: bool = False
+    processing: bool = False
+    processing_error: str | None = None
     pages: list[PageResult] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -108,6 +110,8 @@ class SessionState:
             "cmyk_pending": self.cmyk_pending,
             "approved": self.approved,
             "preview_ready": self.preview_ready,
+            "processing": self.processing,
+            "processing_error": self.processing_error,
             "pages": [p.to_dict() for p in self.pages],
         }
 
@@ -155,6 +159,8 @@ class VizitkaService:
             cmyk_pending=data.get("cmyk_pending", False),
             approved=data.get("approved", False),
             preview_ready=data.get("preview_ready", False),
+            processing=data.get("processing", False),
+            processing_error=data.get("processing_error"),
             pages=pages,
         )
 
@@ -174,18 +180,20 @@ class VizitkaService:
         suffix = "markup" if markup else "plain"
         return self._session_dir(session_id) / f"preview_p{page}_{suffix}.png"
 
-    def process_upload(
+    def begin_upload(
         self,
         content: bytes,
         filename: str,
         order: OrderConfig,
         fix_mode: str = "stretch",
     ) -> SessionState:
+        """Быстрое сохранение PDF и валидация — ответ до таймаута nginx."""
         session_id = uuid.uuid4().hex
         sdir = self._session_dir(session_id)
         sdir.mkdir(parents=True, exist_ok=True)
         original = sdir / "original.pdf"
         original.write_bytes(content)
+        shutil.copy(original, sdir / "working.pdf")
 
         state = SessionState(
             session_id=session_id,
@@ -193,52 +201,106 @@ class VizitkaService:
             original_name=filename,
             created_at=datetime.now(timezone.utc).isoformat(),
             fix_mode=fix_mode if fix_mode in FIX_MODES else "stretch",
+            processing=True,
         )
 
         page_count = len(analyze_pdf(original, target_w_mm=order.width_mm, target_h_mm=order.height_mm))
         self._validate_page_count(page_count, order)
 
-        dims_before_pf = analyze_pdf(
+        dims_before = analyze_pdf(
             original,
             target_w_mm=order.width_mm,
             target_h_mm=order.height_mm,
             required_bleed_mm=order.bleed_mm,
         )
-
-        working = sdir / "working.pdf"
-        shutil.copy(original, working)
-
-        if fix_mode != "as_is":
-            working, rgb_ok, bleed_ok = self._apply_fix_pipeline(
-                working, order, fix_mode, convert_cmyk=True
-            )
-            state.rgb_converted = rgb_ok
-            state.bleed_applied = bleed_ok
-            state.cmyk_pending = False
-        else:
-            state.rgb_converted = False
-            state.bleed_applied = False
-            state.cmyk_pending = False
-
-        dims_after_pf = analyze_pdf(
-            working,
-            target_w_mm=order.width_mm,
-            target_h_mm=order.height_mm,
-            required_bleed_mm=order.bleed_mm,
-        )
-        state.pages = self._build_page_results(dims_before_pf, dims_after_pf, order, state)
-        state.processed = fix_mode != "as_is"
-        state.needs_consent = state.processed and any(
-            not a.has_bleed
-            or not a.size_ok
-            or (a.has_rgb and not state.rgb_converted and not state.cmyk_pending)
-            for a in dims_after_pf
-        )
-
-        preview_ok = self._generate_previews(session_id, working, len(dims_after_pf), order)
-        state.preview_ready = preview_ok
+        state.pages = self._placeholder_pages(dims_before, order)
         self._save_meta(state)
         return state
+
+    def finish_upload(self, session_id: str) -> None:
+        """Тяжёлая обработка (Callas CMYK, вылеты, превью) — в фоне."""
+        state = self._load_meta(session_id)
+        try:
+            sdir = self._session_dir(session_id)
+            original = sdir / "original.pdf"
+            working = sdir / "working.pdf"
+            shutil.copy(original, working)
+
+            dims_before_pf = analyze_pdf(
+                original,
+                target_w_mm=state.order.width_mm,
+                target_h_mm=state.order.height_mm,
+                required_bleed_mm=state.order.bleed_mm,
+            )
+
+            if state.fix_mode != "as_is":
+                working, rgb_ok, bleed_ok = self._apply_fix_pipeline(
+                    working, state.order, state.fix_mode, convert_cmyk=True
+                )
+                state.rgb_converted = rgb_ok
+                state.bleed_applied = bleed_ok
+                state.cmyk_pending = False
+            else:
+                state.rgb_converted = False
+                state.bleed_applied = False
+                state.cmyk_pending = False
+
+            dims_after_pf = analyze_pdf(
+                working,
+                target_w_mm=state.order.width_mm,
+                target_h_mm=state.order.height_mm,
+                required_bleed_mm=state.order.bleed_mm,
+            )
+            state.pages = self._build_page_results(dims_before_pf, dims_after_pf, state.order, state)
+            state.processed = state.fix_mode != "as_is"
+            state.needs_consent = state.processed and any(
+                not a.has_bleed
+                or not a.size_ok
+                or (a.has_rgb and not state.rgb_converted and not state.cmyk_pending)
+                for a in dims_after_pf
+            )
+            state.preview_ready = self._generate_previews(
+                session_id, working, len(dims_after_pf), state.order
+            )
+            state.processing = False
+            state.processing_error = None
+            logger.info("finish_upload ok: %s", session_id)
+        except Exception as e:
+            logger.exception("finish_upload %s", session_id)
+            state.processing = False
+            state.processing_error = str(e)
+        self._save_meta(state)
+
+    def process_upload(
+        self,
+        content: bytes,
+        filename: str,
+        order: OrderConfig,
+        fix_mode: str = "stretch",
+    ) -> SessionState:
+        state = self.begin_upload(content, filename, order, fix_mode=fix_mode)
+        self.finish_upload(state.session_id)
+        return self._load_meta(state.session_id)
+
+    def _placeholder_pages(self, dims: list[PagePreflight], _order: OrderConfig) -> list[PageResult]:
+        labels = ["Страница 1", "Страница 2", "Страница 3", "Страница 4"]
+        pages: list[PageResult] = []
+        for i, a in enumerate(dims):
+            messages = [
+                PageMessage("info", "Обработка макета (вылеты, CMYK)…"),
+                *[PageMessage(m["level"], m["text"]) for m in a.messages],
+            ]
+            pages.append(
+                PageResult(
+                    page=i + 1,
+                    label=labels[i] if i < len(labels) else f"Страница {i + 1}",
+                    width_mm=a.trim_w_mm,
+                    height_mm=a.trim_h_mm,
+                    messages=messages,
+                    preflight=a.to_dict(),
+                )
+            )
+        return pages
 
     def apply_fix(
         self, session_id: str, fix_mode: str, *, convert_cmyk: bool = True
