@@ -44,15 +44,25 @@ echo "=== 4. Профиль CMYK в Callas ==="
 docker compose exec -T web sh -c "find /opt/callas/var/Profiles -iname '*CMYK*ISO*' -name '*.kfpx' 2>/dev/null | head -5"
 echo
 
-echo "=== 5. Лицензия Callas ==="
+echo "=== 5. Языковые файлы Callas ==="
+docker compose exec -T web sh -c 'ls -la /opt/callas/lang/pdfToolbox.*.bin 2>/dev/null || echo "lang/*.bin не найдены"'
+echo
+
+echo "=== 6. Лицензия Callas ==="
 docker compose exec -T web sh -c 'find /opt/callas -maxdepth 3 \( -iname "*.lic" -o -iname "*license*" \) 2>/dev/null | head -10' || true
 echo
 
-echo "=== 6. Запуск CMYK профиля ==="
+CMYK_PATH="$(docker compose exec -T web sh -c "find /opt/callas/var/Profiles -name '${CMYK_PROFILE}' 2>/dev/null | head -1" | tr -d '\r')"
+if [ -z "$CMYK_PATH" ]; then
+  echo "ERROR: профиль CMYK не найден: $CMYK_PROFILE"
+  exit 1
+fi
+echo "=== 7. Запуск CMYK профиля ==="
+echo "Профиль: $CMYK_PATH"
 set +e
-docker compose exec -T -w /opt/callas web ./pdfToolbox --language=ru \
+docker compose exec -T -w /opt/callas web ./pdfToolbox \
   -o=/tmp/test_cmyk.pdf \
-  "/opt/callas/var/Profiles/${CMYK_PROFILE}" \
+  "$CMYK_PATH" \
   "$WORKING" 2>&1
 EXIT=$?
 set -e
@@ -64,12 +74,12 @@ docker compose exec -T web ls -la /tmp/test_cmyk.pdf 2>/dev/null \
   || echo "FAIL: test_cmyk.pdf не создан"
 
 echo
-echo "=== 7. Логи web (CMYK) ==="
+echo "=== 8. Логи web (CMYK) ==="
 docker compose logs web --tail 80 2>/dev/null | grep -i cmyk || echo "(нет строк CMYK в последних 80 строках)"
 
 echo
 case "$EXIT" in
   0|1|2|5|6|7|8) echo "Код $EXIT — профиль отработал (возможны предупреждения)." ;;
-  101) echo "Код 101 — чаще всего лицензия Callas или критическая ошибка профиля." ;;
+  101) echo "Код 101 — см. текст ошибки выше (часто: нет pdfToolbox.ru.bin — уберите --language=ru)." ;;
   *) echo "Код $EXIT — ошибка Callas, см. вывод выше." ;;
 esac

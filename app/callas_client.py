@@ -20,6 +20,18 @@ CALLAS_HOME = Path(
 DEFAULT_TIMEOUT = int(os.getenv("CALLAS_TIMEOUT", "180"))
 
 
+def _lang_args(home: Path) -> list[str]:
+    """ru.bin часто отсутствует в CLI-сборке — без файла Callas падает с exit 101."""
+    override = os.getenv("CALLAS_LANGUAGE", "").strip()
+    if override:
+        return [f"--language={override}"]
+    if (home / "lang" / "pdfToolbox.ru.bin").is_file():
+        return ["--language=ru"]
+    if (home / "lang" / "pdfToolbox.en.bin").is_file():
+        return ["--language=en"]
+    return []
+
+
 @dataclass
 class CallasResult:
     returncode: int
@@ -88,17 +100,21 @@ class CallasClient:
         """Проверка наличия ключевых профилей (CLI может быть ok, а профилей — нет)."""
         checks = {
             "bleed_edges": self.find_profile(
-                "Generate bleed at page edges.kfpx", "*Generate*bleed*edges*"
+                "Generate bleed at page edges.kfpx",
+                "*Generate*bleed*edges*",
+                "*bleed*edges*",
             ),
             "bleed_upscale": self.find_profile(
-                "Generate bleed by upscaling.kfpx", "*upscal*bleed*"
+                "Generate bleed by upscaling.kfpx",
+                "*upscal*bleed*",
+                "*bleed*upscal*",
             ),
             "cmyk": self.find_profile(
                 "Convert to CMYK only (ISO Coated v2 (ECI)).kfpx", "*CMYK*ISO Coated v2*"
             ),
             "preflight": self.find_profile("Check and fix bleed.kfpx", "*Check*bleed*"),
         }
-        return {k: (str(v.name) if v else None) for k, v in checks.items()}
+        return {k: (str(v.relative_to(profiles)) if v else None) for k, v in checks.items()}
 
     def quick_info(self, pdf: Path) -> str:
         code, out, err = self._run(["--quickpdfinfo", str(pdf)])
@@ -115,12 +131,15 @@ class CallasClient:
         analyze_only: bool = False,
         variables: dict[str, str | float] | None = None,
         report_xml: Path | None = None,
-        language: str = "ru",
+        language: str | None = None,
     ) -> CallasResult:
         args: list[str] = []
         if analyze_only:
             args.append("--analyze")
-        args.append(f"--language={language}")
+        if language is not None:
+            args.append(f"--language={language}")
+        else:
+            args.extend(_lang_args(self.home))
         if report_xml:
             args.extend(["-r=XML,ALWAYS,PATH=" + str(report_xml)])
         if variables:
@@ -217,7 +236,7 @@ class CallasClient:
 
         args = [
             "--visualizer",
-            "--language=ru",
+            *_lang_args(self.home),
             f"--part=safety_full",
             "--imgformat=PNG",
             f"--resolution={width}x{height}",
@@ -240,7 +259,7 @@ class CallasClient:
         code, out, err = self._run(
             [
                 "--visualizer",
-                "--language=ru",
+                *_lang_args(self.home),
                 "--part=safety_full",
                 "--format=pdfreport",
                 "--resolution=150",

@@ -279,11 +279,16 @@ def health():
             profiles = callas.list_key_profiles()
         except CallasError:
             profiles = {}
+    callas_home = os.getenv("CALLAS_HOME", "/opt/pdftoolbox/callas_pdfToolboxCLI_x64_Linux_17-0-682")
+    lang_home = Path(callas_home)
     return {
         "status": "ok",
         "service": "pdf-bleed-adjuster",
         "callas": callas is not None,
-        "callas_home": os.getenv("CALLAS_HOME", "/opt/pdftoolbox/callas_pdfToolboxCLI_x64_Linux_17-0-682"),
+        "callas_home": callas_home,
+        "callas_language": os.getenv("CALLAS_LANGUAGE")
+        or ("ru" if (lang_home / "lang" / "pdfToolbox.ru.bin").is_file() else None)
+        or ("en" if (lang_home / "lang" / "pdfToolbox.en.bin").is_file() else "default"),
         "profiles": profiles,
         "profiles_ok": bool(profiles.get("bleed_edges") and profiles.get("cmyk")),
     }
