@@ -98,6 +98,7 @@ class CallasClient:
 
     def list_key_profiles(self) -> dict[str, str | None]:
         """Проверка наличия ключевых профилей (CLI может быть ok, а профилей — нет)."""
+        profiles_dir = self.home / "var" / "Profiles"
         checks = {
             "bleed_edges": self.find_profile(
                 "Generate bleed at page edges.kfpx",
@@ -114,7 +115,7 @@ class CallasClient:
             ),
             "preflight": self.find_profile("Check and fix bleed.kfpx", "*Check*bleed*"),
         }
-        return {k: (str(v.relative_to(profiles)) if v else None) for k, v in checks.items()}
+        return {k: (str(v.relative_to(profiles_dir)) if v else None) for k, v in checks.items()}
 
     def license_probe(self, pdf: Path | None = None) -> dict[str, str | bool]:
         """Проверка лицензии через запуск CMYK-профиля (exit 1008 = нет лицензии)."""
