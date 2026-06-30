@@ -32,6 +32,16 @@ def _lang_args(home: Path) -> list[str]:
     return []
 
 
+def _cache_args() -> list[str]:
+    """Каталог лицензии — в Docker нет ~/.callas software с хоста."""
+    cache = os.getenv("CALLAS_CACHE_FOLDER", "").strip()
+    if not cache:
+        return []
+    path = Path(cache)
+    path.mkdir(parents=True, exist_ok=True)
+    return [f"--cachefolder={path}"]
+
+
 @dataclass
 class CallasResult:
     returncode: int
@@ -292,7 +302,7 @@ class CallasClient:
             logger.warning("safety_report: %s", err or out)
 
     def _run(self, args: list[str]) -> tuple[int, str, str]:
-        cmd = [str(self.binary), *args]
+        cmd = [str(self.binary), *_cache_args(), *args]
         logger.info("callas: %s", " ".join(cmd[:6]) + ("..." if len(cmd) > 6 else ""))
         try:
             proc = subprocess.run(

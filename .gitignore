@@ -11,6 +11,7 @@ ENV/
 *.log
 logs/
 .deploy_pid
+callas-license/
 .idea/
 .vscode/
 *.swp

@@ -49,7 +49,7 @@ docker compose exec -T web sh -c 'ls -la /opt/callas/lang/pdfToolbox.*.bin 2>/de
 echo
 
 echo "=== 6. Лицензия Callas ==="
-docker compose exec -T web sh -c 'find /opt/callas -maxdepth 3 \( -iname "*.lic" -o -iname "*license*" \) 2>/dev/null | head -10' || true
+docker compose exec -T web sh -c 'ls -la /var/callas-license/ 2>/dev/null; echo "---"; find /opt/callas -maxdepth 2 -iname "License.txt" 2>/dev/null | head -5' || true
 echo
 
 CMYK_PATH="$(docker compose exec -T web sh -c "find /opt/callas/var/Profiles -name '${CMYK_PROFILE}' 2>/dev/null | head -1" | tr -d '\r')"
@@ -61,6 +61,8 @@ echo "=== 7. Запуск CMYK профиля ==="
 echo "Профиль: $CMYK_PATH"
 set +e
 docker compose exec -T -w /opt/callas web ./pdfToolbox \
+  --cachefolder=/var/callas-license \
+  --language=en \
   -o=/tmp/test_cmyk.pdf \
   "$CMYK_PATH" \
   "$WORKING" 2>&1
@@ -82,7 +84,7 @@ case "$EXIT" in
   0|1|2|5|6|7|8) echo "Код $EXIT — профиль отработал (возможны предупреждения)." ;;
   100|101)
     echo "Код $EXIT — ошибка Callas, см. вывод выше."
-    echo "  1008 / Not activated — нет лицензии pdfToolbox CLI (нужна активация на сервере)."
+    echo "  1008 / Not activated — лицензия не видна в контейнере. Запустите: bash scripts/setup-callas-license.sh"
     echo "  1002 — нет языкового файла (задайте CALLAS_LANGUAGE=en)."
     ;;
   *) echo "Код $EXIT — ошибка Callas, см. вывод выше." ;;

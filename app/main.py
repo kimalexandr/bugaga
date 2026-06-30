@@ -289,6 +289,7 @@ def health():
         "callas_language": os.getenv("CALLAS_LANGUAGE")
         or ("ru" if (lang_home / "lang" / "pdfToolbox.ru.bin").is_file() else None)
         or ("en" if (lang_home / "lang" / "pdfToolbox.en.bin").is_file() else "default"),
+        "callas_cache_folder": os.getenv("CALLAS_CACHE_FOLDER") or None,
         "profiles": profiles,
         "profiles_ok": bool(profiles.get("bleed_edges") and profiles.get("cmyk")),
     }

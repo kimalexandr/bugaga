@@ -1,17 +1,19 @@
 services:
   web:
     build: .
-    ports:
-      - "8000:8000"
+    # Лицензия Callas привязана к MAC хоста — bridge-сеть контейнера даёт другие UUID.
+    network_mode: host
     restart: unless-stopped
     environment:
       - PYTHONUNBUFFERED=1
       - CALLAS_HOME=/opt/callas
       - CALLAS_LANGUAGE=en
+      - CALLAS_CACHE_FOLDER=/var/callas-license
       - VIZITKA_SESSION_DIR=/tmp/vizitka-sessions
     volumes:
       - ./logs:/app/logs
       - /opt/pdftoolbox/callas_pdfToolboxCLI_x64_Linux_17-0-682:/opt/callas:ro
+      - ./callas-license:/var/callas-license
       - vizitka-sessions:/tmp/vizitka-sessions
 
 volumes:
