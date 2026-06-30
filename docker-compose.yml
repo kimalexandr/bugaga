@@ -14,6 +14,7 @@ services:
       - ./logs:/app/logs
       - /opt/pdftoolbox/callas_pdfToolboxCLI_x64_Linux_17-0-682:/opt/callas:ro
       - ./callas-license:/var/callas-license
+      - /root/.callas software:/root/.callas software:ro
       - vizitka-sessions:/tmp/vizitka-sessions
 
 volumes:

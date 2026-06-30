@@ -49,7 +49,7 @@ docker compose exec -T web sh -c 'ls -la /opt/callas/lang/pdfToolbox.*.bin 2>/de
 echo
 
 echo "=== 6. Лицензия Callas ==="
-docker compose exec -T web sh -c 'ls -la /var/callas-license/ 2>/dev/null; echo "---"; find /opt/callas -maxdepth 2 -iname "License.txt" 2>/dev/null | head -5' || true
+docker compose exec -T web sh -c 'ls -la "/var/callas-license/callas software/callas pdfToolbox CLI 17/" 2>/dev/null; ls -la "/root/.callas software/callas pdfToolbox CLI 17/" 2>/dev/null' || true
 echo
 
 CMYK_PATH="$(docker compose exec -T web sh -c "find /opt/callas/var/Profiles -name '${CMYK_PROFILE}' 2>/dev/null | head -1" | tr -d '\r')"
