@@ -79,11 +79,22 @@ class CallasClient:
             raise CallasError(f"pdfToolbox не найден: {self.binary}")
 
     def available(self) -> bool:
+        """Проверка бинарника без --cachefolder (битая лицензия в cache не должна скрывать CLI)."""
         try:
-            code, _, _ = self._run(["--help"])
+            code, _, _ = self._run(["--help"], use_cache=False)
             return code < 100
         except (CallasError, subprocess.SubprocessError, OSError):
             return False
+
+    def license_status(self) -> dict[str, str | bool]:
+        """Краткая проверка лицензии (--status с cachefolder)."""
+        code, out, err = self._run(["--status"], use_cache=True)
+        text = (out or err or "").strip()
+        licensed = code < 100 and "trial" in text.lower() or (
+            code < 100 and "expiration date" in text.lower()
+        )
+        first = next((ln for ln in text.splitlines() if ln.strip()), f"exit={code}")
+        return {"licensed": licensed, "detail": first[:200]}
 
     def find_profile(self, *patterns: str) -> Path | None:
         profiles = self.home / "var" / "Profiles"
@@ -301,8 +312,9 @@ class CallasClient:
         if code >= 100:
             logger.warning("safety_report: %s", err or out)
 
-    def _run(self, args: list[str]) -> tuple[int, str, str]:
-        cmd = [str(self.binary), *_cache_args(), *args]
+    def _run(self, args: list[str], *, use_cache: bool = True) -> tuple[int, str, str]:
+        prefix = _cache_args() if use_cache else []
+        cmd = [str(self.binary), *prefix, *args]
         logger.info("callas: %s", " ".join(cmd[:6]) + ("..." if len(cmd) > 6 else ""))
         try:
             proc = subprocess.run(

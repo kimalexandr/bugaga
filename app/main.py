@@ -281,10 +281,12 @@ def health():
             profiles = {}
     callas_home = os.getenv("CALLAS_HOME", "/opt/pdftoolbox/callas_pdfToolboxCLI_x64_Linux_17-0-682")
     lang_home = Path(callas_home)
+    callas_binary = lang_home / "pdfToolbox"
     data: dict = {
         "status": "ok",
         "service": "pdf-bleed-adjuster",
         "callas": callas is not None,
+        "callas_binary": callas_binary.is_file(),
         "callas_home": callas_home,
         "callas_language": os.getenv("CALLAS_LANGUAGE")
         or ("ru" if (lang_home / "lang" / "pdfToolbox.ru.bin").is_file() else None)
@@ -293,6 +295,16 @@ def health():
         "profiles": profiles,
         "profiles_ok": bool(profiles.get("bleed_edges") and profiles.get("cmyk")),
     }
+    if not callas:
+        if not callas_binary.is_file():
+            data["callas_error"] = "pdfToolbox не найден — проверьте volume /opt/callas"
+        else:
+            data["callas_error"] = "pdfToolbox не отвечает на --help"
+    elif callas and os.getenv("CALLAS_CACHE_FOLDER"):
+        try:
+            data["callas_license"] = callas.license_status()
+        except CallasError as e:
+            data["callas_license"] = {"licensed": False, "detail": str(e)}
     if callas and os.getenv("CALLAS_LICENSE_PROBE", "").lower() in ("1", "true", "yes"):
         probe_pdf = Path(os.getenv("CALLAS_LICENSE_PROBE_PDF", ""))
         if not probe_pdf.is_file():
