@@ -123,3 +123,76 @@ def apply_white_margins_pdf(
     out.close()
     doc.close()
     logging.info("✅ Белые поля %.1f мм → %s", margin_mm, output_path)
+
+
+def apply_mirror_bleed_pdf(
+    input_path: str,
+    output_path: str,
+    bleed_mm: float = 2.0,
+    *,
+    dpi: int = 200,
+) -> None:
+    """Вылеты зеркалированием краёв TrimBox (растр, PyMuPDF + Pillow)."""
+    import io
+
+    try:
+        import fitz
+        from PIL import Image
+    except ImportError as e:
+        raise RuntimeError("PyMuPDF и Pillow нужны для зеркальных вылетов") from e
+
+    bleed_pt = bleed_mm * MM_TO_PT
+    bleed_px = max(1, int(round(bleed_mm / 25.4 * dpi)))
+    zoom = dpi / 72.0
+    mat = fitz.Matrix(zoom, zoom)
+
+    doc = fitz.open(input_path)
+    out = fitz.open()
+
+    for pno in range(doc.page_count):
+        src = doc[pno]
+        trim = src.trimbox if src.trimbox else src.rect
+        media = fitz.Rect(
+            trim.x0 - bleed_pt,
+            trim.y0 - bleed_pt,
+            trim.x1 + bleed_pt,
+            trim.y1 + bleed_pt,
+        )
+
+        pix = src.get_pixmap(matrix=mat, clip=trim, alpha=False)
+        img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+        w, h = img.size
+        canvas = Image.new("RGB", (w + 2 * bleed_px, h + 2 * bleed_px), (255, 255, 255))
+        canvas.paste(img, (bleed_px, bleed_px))
+
+        top = img.crop((0, 0, w, bleed_px)).transpose(Image.FLIP_TOP_BOTTOM)
+        canvas.paste(top, (bleed_px, 0))
+        bottom = img.crop((0, h - bleed_px, w, h)).transpose(Image.FLIP_TOP_BOTTOM)
+        canvas.paste(bottom, (bleed_px, h + bleed_px))
+        left = img.crop((0, 0, bleed_px, h)).transpose(Image.FLIP_LEFT_RIGHT)
+        canvas.paste(left, (0, bleed_px))
+        right = img.crop((w - bleed_px, 0, w, h)).transpose(Image.FLIP_LEFT_RIGHT)
+        canvas.paste(right, (w + bleed_px, bleed_px))
+
+        tl = img.crop((0, 0, bleed_px, bleed_px)).transpose(Image.ROTATE_180)
+        canvas.paste(tl, (0, 0))
+        tr = img.crop((w - bleed_px, 0, w, bleed_px)).transpose(Image.ROTATE_180)
+        canvas.paste(tr, (w + bleed_px, 0))
+        bl = img.crop((0, h - bleed_px, bleed_px, h)).transpose(Image.ROTATE_180)
+        canvas.paste(bl, (0, h + bleed_px))
+        br = img.crop((w - bleed_px, h - bleed_px, w, h)).transpose(Image.ROTATE_180)
+        canvas.paste(br, (w + bleed_px, h + bleed_px))
+
+        page = out.new_page(width=media.width, height=media.height)
+        page.set_mediabox(media)
+        page.set_cropbox(media)
+        page.set_trimbox(trim)
+        page.set_bleedbox(media)
+        buf = io.BytesIO()
+        canvas.save(buf, format="PNG")
+        page.insert_image(media, stream=buf.getvalue())
+
+    out.save(output_path, garbage=4, deflate=True)
+    out.close()
+    doc.close()
+    logging.info("✅ Зеркальные вылеты %.1f мм → %s", bleed_mm, output_path)

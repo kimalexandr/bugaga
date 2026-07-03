@@ -15,7 +15,7 @@ import pikepdf
 
 from app.callas_client import CallasClient, CallasError
 from app.preflight import PagePreflight, analyze_pdf
-from app.processor import adjust_bleed_pdf, apply_white_margins_pdf
+from app.processor import adjust_bleed_pdf, apply_mirror_bleed_pdf, apply_white_margins_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ SESSION_ROOT = Path(os.getenv("VIZITKA_SESSION_DIR", "/tmp/vizitka-sessions"))
 SESSION_TTL_HOURS = int(os.getenv("VIZITKA_SESSION_TTL_HOURS", "24"))
 TRIM_PREVIEW_OFFSET_MM = float(os.getenv("TRIM_PREVIEW_OFFSET_MM", "1.0"))
 
-FIX_MODES = ("as_is", "stretch", "stretch_strong", "white_margins")
+FIX_MODES = ("as_is", "stretch", "stretch_strong", "white_margins", "mirror_bleed")
 
 
 @dataclass
@@ -134,7 +134,9 @@ class VizitkaService:
         if not path.is_file():
             raise FileNotFoundError("Сессия не найдена")
         data = json.loads(path.read_text(encoding="utf-8"))
-        order = OrderConfig(**data["order"])
+        order_data = dict(data["order"])
+        order_data.setdefault("trim_preview_offset_mm", TRIM_PREVIEW_OFFSET_MM)
+        order = OrderConfig(**order_data)
         pages = [
             PageResult(
                 page=p["page"],
@@ -369,6 +371,26 @@ class VizitkaService:
         self._save_meta(state)
         return state
 
+    def update_preview_settings(
+        self,
+        session_id: str,
+        *,
+        trim_preview_offset_mm: float | None = None,
+        safe_mm: float | None = None,
+    ) -> SessionState:
+        state = self._load_meta(session_id)
+        if trim_preview_offset_mm is not None:
+            state.order.trim_preview_offset_mm = max(0.0, min(3.0, float(trim_preview_offset_mm)))
+        if safe_mm is not None:
+            state.order.safe_mm = max(0.0, min(10.0, float(safe_mm)))
+        pdf = self.working_pdf(session_id)
+        count = len(
+            analyze_pdf(pdf, target_w_mm=state.order.width_mm, target_h_mm=state.order.height_mm)
+        )
+        state.preview_ready = self._generate_previews(session_id, pdf, count, state.order)
+        self._save_meta(state)
+        return state
+
     def get_state(self, session_id: str) -> SessionState:
         return self._load_meta(session_id)
 
@@ -398,6 +420,17 @@ class VizitkaService:
                     logger.info("белые поля внутри TrimBox (%.1f мм)", order.bleed_mm)
             except Exception as e:
                 logger.warning("white margins: %s", e)
+
+        if fix_mode == "mirror_bleed" and not bleed_ok:
+            tmp = pdf.parent / "step_mirror.pdf"
+            try:
+                apply_mirror_bleed_pdf(str(pdf), str(tmp), order.bleed_mm)
+                if tmp.is_file():
+                    shutil.copy2(tmp, pdf)
+                    bleed_ok = True
+                    logger.info("зеркальные вылеты (%.1f мм)", order.bleed_mm)
+            except Exception as e:
+                logger.warning("mirror bleed: %s", e)
 
         if not bleed_ok and fix_mode in ("stretch", "stretch_strong", "white_margins"):
             tmp = pdf.parent / "step_boxes.pdf"

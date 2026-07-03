@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 
 from app.callas_client import CallasClient, CallasError
 from app.processor import adjust_bleed_pdf
-from app.vizitka_service import FIX_MODES, OrderConfig, VizitkaService
+from app.vizitka_service import FIX_MODES, OrderConfig, VizitkaService, TRIM_PREVIEW_OFFSET_MM
 
 logging.basicConfig(level=logging.INFO)
 app = FastAPI(title="PDF Bleed Adjuster", version="2.0")
@@ -84,6 +84,7 @@ async def vizitka_upload(
     material: str = Form("Мелованный картон 300"),
     bleed_mm: float = Form(2.0),
     safe_mm: float = Form(2.0),
+    trim_preview_offset_mm: float = Form(TRIM_PREVIEW_OFFSET_MM),
     fix_mode: str = Form("stretch"),
 ):
     if not _is_pdf_upload(file):
@@ -101,6 +102,7 @@ async def vizitka_upload(
         material=material,
         bleed_mm=bleed_mm,
         safe_mm=safe_mm,
+        trim_preview_offset_mm=trim_preview_offset_mm,
     )
 
     try:
@@ -140,6 +142,25 @@ async def vizitka_fix(session_id: str, fix_mode: str = Form(...), preview_only: 
         logging.exception("fix error")
         raise HTTPException(500, f"Ошибка: {e}") from e
 
+    return _enrich_response(state)
+
+
+@app.post("/api/vizitka/{session_id}/preview-settings")
+async def vizitka_preview_settings(
+    session_id: str,
+    trim_preview_offset_mm: float = Form(...),
+    safe_mm: float | None = Form(None),
+):
+    try:
+        state = _get_vizitka().update_preview_settings(
+            session_id,
+            trim_preview_offset_mm=trim_preview_offset_mm,
+            safe_mm=safe_mm,
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     return _enrich_response(state)
 
 

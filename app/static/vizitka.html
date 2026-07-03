@@ -181,6 +181,18 @@
         <h3>Варианты изготовления</h3>
         <div class="turnaround" id="turnaround"></div>
       </div>
+      <div class="option-group">
+        <h3>Разметка в превью</h3>
+        <label style="display:block;font-size:0.9rem;margin-top:8px">
+          Смещение зелёной линии реза (мм)
+          <input type="number" id="trimOffsetInput" min="0" max="3" step="0.1" value="1"
+            style="display:block;margin-top:6px;width:120px;padding:8px;border:1px solid #ccc;border-radius:6px" />
+        </label>
+        <p style="color:var(--muted);font-size:0.8rem;margin-top:8px;max-width:420px">
+          Допуск гильотины при зеркальных вылетах: зелёная рамка показывает ожидаемый рез после обрезки.
+          Можно изменить на шаге «разметка» без перезагрузки PDF.
+        </p>
+      </div>
     </div>
 
     <!-- Шаг 3: макет -->
@@ -207,8 +219,16 @@
         <div class="preview-overlay-lines"></div>
         <img id="markupImg" alt="Макет" />
       </div>
-      <div class="legend">
-        <div><span class="green">— —</span> ожидаемый рез с допуском обрезки (~1&nbsp;мм)</div>
+      <div class="option-group" style="margin-top:16px;max-width:420px">
+        <label style="display:block;font-size:0.9rem">
+          Смещение зелёной линии реза (мм)
+          <input type="number" id="trimOffsetStep4" min="0" max="3" step="0.1" value="1"
+            style="display:block;margin-top:6px;width:120px;padding:8px;border:1px solid #ccc;border-radius:6px" />
+        </label>
+        <button type="button" class="btn btn-blue" id="btnRefreshMarkup" style="margin-top:10px">Обновить разметку</button>
+      </div>
+      <div class="legend" id="markupLegend">
+        <div><span class="green">— —</span> ожидаемый рез с допуском обрезки (<span id="legendTrimOffset">1</span>&nbsp;мм)</div>
         <div><span style="color:#b0b0b0">— —</span> номинальный TrimBox в PDF (серая)</div>
         <div><span class="red">— —</span> безопасный отступ от линии реза (2&nbsp;мм)</div>
         <p style="color:var(--muted);margin-top:10px;font-size:0.8rem">
@@ -260,6 +280,7 @@
             <label class="radio-opt"><input type="radio" name="fixMode" value="stretch" checked /> Растянуть края</label>
             <label class="radio-opt"><input type="radio" name="fixMode" value="stretch_strong" /> Сильно растянуть края</label>
             <label class="radio-opt"><input type="radio" name="fixMode" value="white_margins" /> Добавить белые поля</label>
+            <label class="radio-opt"><input type="radio" name="fixMode" value="mirror_bleed" /> Зеркальные вылеты</label>
           </div>
           <div class="legend" id="fixHint" style="margin-top:12px;font-size:0.8rem;color:var(--muted)"></div>
           <div id="fixMessages" style="margin-top:10px;font-size:0.82rem"></div>
@@ -293,7 +314,8 @@
     let order = {
       product: "Визитки эконом",
       width: 90, height: 50, sides: "4-4", material: "Мелованный картон 300",
-      quantity: 100, turnaround: "1 день", price: 216
+      quantity: 100, turnaround: "1 день", price: 216,
+      trimPreviewOffsetMm: 1.0, bleedMm: 2.0, safeMm: 2.0
     };
 
     const stepsBar = document.getElementById("stepsBar");
@@ -327,7 +349,40 @@
       document.getElementById("plainPreview").addEventListener("click", flipPreview);
       document.getElementById("approveCheck").addEventListener("change", onApprove);
       document.getElementById("btnDownload").addEventListener("click", downloadPdf);
+      document.getElementById("btnRefreshMarkup").addEventListener("click", applyPreviewSettings);
+      document.getElementById("trimOffsetInput").addEventListener("change", syncTrimOffsetFromStep2);
+      document.getElementById("trimOffsetStep4").addEventListener("change", syncTrimOffsetFromStep4);
       updateOrderSummary();
+    }
+
+    function getTrimOffsetMm() {
+      const el = step === 4 ? document.getElementById("trimOffsetStep4") : document.getElementById("trimOffsetInput");
+      const v = parseFloat(el?.value);
+      return Number.isFinite(v) ? Math.max(0, Math.min(3, v)) : 1.0;
+    }
+
+    function setTrimOffsetInputs(mm) {
+      const v = String(mm);
+      const a = document.getElementById("trimOffsetInput");
+      const b = document.getElementById("trimOffsetStep4");
+      if (a) a.value = v;
+      if (b) b.value = v;
+      const leg = document.getElementById("legendTrimOffset");
+      if (leg) leg.textContent = v;
+      order.trimPreviewOffsetMm = mm;
+    }
+
+    function syncTrimOffsetFromStep2() {
+      setTrimOffsetInputs(getTrimOffsetMm());
+    }
+
+    function syncTrimOffsetFromStep4() {
+      setTrimOffsetInputs(getTrimOffsetMm());
+    }
+
+    function updateMarkupLegend() {
+      const off = session?.order?.trim_preview_offset_mm ?? order.trimPreviewOffsetMm ?? 1;
+      setTrimOffsetInputs(off);
     }
 
     function renderSteps() {
@@ -350,7 +405,11 @@
       if (n < 1 || n > 6) return;
       step = n;
       if (step === 4 && session) {
-        refreshSession().then(() => showPreview("markup"));
+        updateMarkupLegend();
+        refreshSession().then(() => {
+          updateMarkupLegend();
+          showPreview("markup");
+        });
       } else if (step === 5 && session) {
         refreshSession().then(() => showPreview("plain"));
       }
@@ -477,6 +536,9 @@
       fd.append("sides", order.sides);
       fd.append("quantity", order.quantity);
       fd.append("material", order.material);
+      fd.append("bleed_mm", order.bleedMm);
+      fd.append("safe_mm", order.safeMm);
+      fd.append("trim_preview_offset_mm", getTrimOffsetMm());
       fd.append("fix_mode", "stretch");
 
       document.querySelector(".wizard").classList.add("loading");
@@ -485,6 +547,7 @@
         const data = await parseJsonResponse(res);
         if (!res.ok) throw new Error(data.detail || res.statusText);
         session = data.is_processing ? await pollSessionUntilReady(data.session_id) : data;
+        updateMarkupLegend();
         renderPreflight(session);
         btnNext.disabled = false;
         showError("");
@@ -560,8 +623,16 @@
       const order = session?.order || {};
       const bleed = pf.bleed_margin_mm != null ? `${pf.bleed_margin_mm} мм` : "—";
       const proc = session?.processing || {};
+      const modeLabels = {
+        stretch: "растянуть края",
+        stretch_strong: "сильно растянуть края",
+        white_margins: "белые поля",
+        mirror_bleed: "зеркальные вылеты",
+        as_is: "без изменений",
+      };
       const lines = [
         `Файл: ${proc.working_pdf || "working.pdf"} — превью из обработанного PDF`,
+        `Режим: ${modeLabels[session?.fix_mode] || session?.fix_mode || "—"}`,
         `TrimBox в файле: ${pageData.width_mm}×${pageData.height_mm} мм · заказ: ${order.width_mm || "?"}×${order.height_mm || "?"} мм`,
         `Вылет от реза: ${bleed}`,
       ];
@@ -663,6 +734,32 @@
         if (data.needs_consent) showConsentModal(data);
       } catch (err) { showError(err.message); }
       finally { document.querySelector(".wizard").classList.remove("loading"); }
+    }
+
+    async function applyPreviewSettings() {
+      if (!session?.session_id) return;
+      const mm = getTrimOffsetMm();
+      setTrimOffsetInputs(mm);
+      const fd = new FormData();
+      fd.append("trim_preview_offset_mm", mm);
+      fd.append("safe_mm", order.safeMm);
+      document.querySelector(".wizard").classList.add("loading");
+      try {
+        const res = await fetch(`/api/vizitka/${session.session_id}/preview-settings`, {
+          method: "POST",
+          body: fd,
+        });
+        const data = await parseJsonResponse(res);
+        if (!res.ok) throw new Error(data.detail || res.statusText);
+        session = data;
+        updateMarkupLegend();
+        showPreview("markup");
+        showError("");
+      } catch (err) {
+        showError(err.message);
+      } finally {
+        document.querySelector(".wizard").classList.remove("loading");
+      }
     }
 
     function showConsentModal(data) {
