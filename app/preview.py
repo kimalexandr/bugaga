@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+MM_TO_PT = 72.0 / 25.4
+DEFAULT_TRIM_PREVIEW_OFFSET_MM = float(os.getenv("TRIM_PREVIEW_OFFSET_MM", "1.0"))
 
 
 def render_pdf_preview(
@@ -30,13 +34,30 @@ def render_markup_preview(
     output: Path,
     *,
     safe_mm: float = 2.0,
+    trim_offset_mm: float = DEFAULT_TRIM_PREVIEW_OFFSET_MM,
     max_width: int = 900,
     max_height: int = 500,
 ) -> bool:
-    """Fallback: MediaBox + зелёная линия реза и красная safe-зона."""
+    """MediaBox + линия реза (со смещением для допуска обрезки) и safe-зона."""
     return _render_markup_pil(
-        pdf_path, page, output, safe_mm=safe_mm, max_width=max_width, max_height=max_height
+        pdf_path,
+        page,
+        output,
+        safe_mm=safe_mm,
+        trim_offset_mm=trim_offset_mm,
+        max_width=max_width,
+        max_height=max_height,
     )
+
+
+def _trim_preview_rect(trim, offset_mm: float):
+    """Смещение линии реза вниз-вправо на экране (допуск гильотины ~1 мм)."""
+    import fitz
+
+    if offset_mm <= 0:
+        return trim
+    off = offset_mm * MM_TO_PT
+    return fitz.Rect(trim.x0 + off, trim.y0 - off, trim.x1 + off, trim.y1 - off)
 
 
 def _render_markup_pil(
@@ -45,6 +66,7 @@ def _render_markup_pil(
     output: Path,
     *,
     safe_mm: float,
+    trim_offset_mm: float,
     max_width: int,
     max_height: int,
 ) -> bool:
@@ -73,10 +95,16 @@ def _render_markup_pil(
             )
 
         safe_pt = safe_mm * 72.0 / 25.4
+        trim_show = _trim_preview_rect(trim, trim_offset_mm)
         safe = fitz.Rect(
-            trim.x0 + safe_pt, trim.y0 + safe_pt, trim.x1 - safe_pt, trim.y1 - safe_pt
+            trim_show.x0 + safe_pt,
+            trim_show.y0 + safe_pt,
+            trim_show.x1 - safe_pt,
+            trim_show.y1 - safe_pt,
         )
-        _dashed_rect(draw, px(trim), (76, 175, 80), 2)
+        if trim_offset_mm > 0.05:
+            _dashed_rect(draw, px(trim), (180, 180, 180), 1)
+        _dashed_rect(draw, px(trim_show), (76, 175, 80), 2)
         _dashed_rect(draw, px(safe), (244, 67, 54), 2)
 
         output.parent.mkdir(parents=True, exist_ok=True)

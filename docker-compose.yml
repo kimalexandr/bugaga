@@ -9,6 +9,7 @@ services:
       - CALLAS_HOME=/opt/callas
       - CALLAS_LANGUAGE=en
       - CALLAS_CACHE_FOLDER=/var/callas-license
+      - TRIM_PREVIEW_OFFSET_MM=1.0
       - VIZITKA_SESSION_DIR=/tmp/vizitka-sessions
     volumes:
       - ./logs:/app/logs

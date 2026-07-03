@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 MM_TO_PT = 72.0 / 25.4
 SESSION_ROOT = Path(os.getenv("VIZITKA_SESSION_DIR", "/tmp/vizitka-sessions"))
 SESSION_TTL_HOURS = int(os.getenv("VIZITKA_SESSION_TTL_HOURS", "24"))
+TRIM_PREVIEW_OFFSET_MM = float(os.getenv("TRIM_PREVIEW_OFFSET_MM", "1.0"))
 
 FIX_MODES = ("as_is", "stretch", "stretch_strong", "white_margins")
 
@@ -36,6 +37,7 @@ class OrderConfig:
     material: str = "Мелованный картон 300"
     bleed_mm: float = 2.0
     safe_mm: float = 2.0
+    trim_preview_offset_mm: float = TRIM_PREVIEW_OFFSET_MM
 
     @property
     def page_count_expected(self) -> int:
@@ -658,6 +660,7 @@ class VizitkaService:
             markup.unlink(missing_ok=True)
             plain_ok = False
             markup_ok = False
+            trim_off = order.trim_preview_offset_mm
 
             if self.callas:
                 try:
@@ -673,7 +676,7 @@ class VizitkaService:
                     pdf, p, plain, max_width=900, max_height=500, pagebox="trimbox"
                 )
 
-            if self.callas:
+            if self.callas and trim_off <= 0:
                 try:
                     self.callas.save_safety_preview(
                         pdf,
@@ -690,7 +693,13 @@ class VizitkaService:
 
             if not markup_ok:
                 markup_ok = render_markup_preview(
-                    pdf, p, markup, safe_mm=order.safe_mm, max_width=900, max_height=500
+                    pdf,
+                    p,
+                    markup,
+                    safe_mm=order.safe_mm,
+                    trim_offset_mm=trim_off,
+                    max_width=900,
+                    max_height=500,
                 )
 
             if not plain_ok and markup_ok:
