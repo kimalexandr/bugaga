@@ -23,6 +23,7 @@ MM_TO_PT = 72.0 / 25.4
 SESSION_ROOT = Path(os.getenv("VIZITKA_SESSION_DIR", "/tmp/vizitka-sessions"))
 SESSION_TTL_HOURS = int(os.getenv("VIZITKA_SESSION_TTL_HOURS", "24"))
 TRIM_PREVIEW_OFFSET_MM = float(os.getenv("TRIM_PREVIEW_OFFSET_MM", "1.0"))
+DEFAULT_FIX_MODE = os.getenv("DEFAULT_FIX_MODE", "mirror_bleed")
 
 FIX_MODES = ("as_is", "stretch", "stretch_strong", "white_margins", "mirror_bleed")
 
@@ -86,7 +87,7 @@ class SessionState:
     order: OrderConfig
     original_name: str
     created_at: str
-    fix_mode: str = "stretch"
+    fix_mode: str = DEFAULT_FIX_MODE
     processed: bool = False
     needs_consent: bool = False
     rgb_converted: bool = False
@@ -155,7 +156,7 @@ class VizitkaService:
             order=order,
             original_name=data["original_name"],
             created_at=data.get("created_at", ""),
-            fix_mode=data.get("fix_mode", "stretch"),
+            fix_mode=data.get("fix_mode", DEFAULT_FIX_MODE),
             processed=data.get("processed", False),
             needs_consent=data.get("needs_consent", False),
             rgb_converted=data.get("rgb_converted", False),
@@ -189,7 +190,7 @@ class VizitkaService:
         content: bytes,
         filename: str,
         order: OrderConfig,
-        fix_mode: str = "stretch",
+        fix_mode: str = DEFAULT_FIX_MODE,
     ) -> SessionState:
         """Быстрое сохранение PDF и валидация — ответ до таймаута nginx."""
         session_id = uuid.uuid4().hex
@@ -204,7 +205,7 @@ class VizitkaService:
             order=order,
             original_name=filename,
             created_at=datetime.now(timezone.utc).isoformat(),
-            fix_mode=fix_mode if fix_mode in FIX_MODES else "stretch",
+            fix_mode=fix_mode if fix_mode in FIX_MODES else DEFAULT_FIX_MODE,
             processing=True,
         )
 
@@ -280,7 +281,7 @@ class VizitkaService:
         content: bytes,
         filename: str,
         order: OrderConfig,
-        fix_mode: str = "stretch",
+        fix_mode: str = DEFAULT_FIX_MODE,
     ) -> SessionState:
         state = self.begin_upload(content, filename, order, fix_mode=fix_mode)
         self.finish_upload(state.session_id)
@@ -410,18 +411,7 @@ class VizitkaService:
                 pdf, order, fix_mode, convert_cmyk=convert_cmyk
             )
 
-        if fix_mode == "white_margins" and not bleed_ok:
-            tmp = pdf.parent / "step_white.pdf"
-            try:
-                apply_white_margins_pdf(str(pdf), str(tmp), margin_mm=order.bleed_mm)
-                if tmp.is_file():
-                    shutil.copy2(tmp, pdf)
-                    bleed_ok = True
-                    logger.info("белые поля внутри TrimBox (%.1f мм)", order.bleed_mm)
-            except Exception as e:
-                logger.warning("white margins: %s", e)
-
-        if fix_mode == "mirror_bleed" and not bleed_ok:
+        if fix_mode == "mirror_bleed":
             tmp = pdf.parent / "step_mirror.pdf"
             try:
                 apply_mirror_bleed_pdf(str(pdf), str(tmp), order.bleed_mm)
@@ -431,6 +421,17 @@ class VizitkaService:
                     logger.info("зеркальные вылеты (%.1f мм)", order.bleed_mm)
             except Exception as e:
                 logger.warning("mirror bleed: %s", e)
+
+        elif fix_mode == "white_margins" and not bleed_ok:
+            tmp = pdf.parent / "step_white.pdf"
+            try:
+                apply_white_margins_pdf(str(pdf), str(tmp), margin_mm=order.bleed_mm)
+                if tmp.is_file():
+                    shutil.copy2(tmp, pdf)
+                    bleed_ok = True
+                    logger.info("белые поля внутри TrimBox (%.1f мм)", order.bleed_mm)
+            except Exception as e:
+                logger.warning("white margins: %s", e)
 
         if not bleed_ok and fix_mode in ("stretch", "stretch_strong", "white_margins"):
             tmp = pdf.parent / "step_boxes.pdf"

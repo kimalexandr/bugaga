@@ -277,10 +277,10 @@
           <strong>Варианты исправления</strong>
           <div style="margin-top:12px">
             <label class="radio-opt"><input type="radio" name="fixMode" value="as_is" /> Оставить как есть</label>
-            <label class="radio-opt"><input type="radio" name="fixMode" value="stretch" checked /> Растянуть края</label>
+            <label class="radio-opt"><input type="radio" name="fixMode" value="stretch" /> Растянуть края</label>
             <label class="radio-opt"><input type="radio" name="fixMode" value="stretch_strong" /> Сильно растянуть края</label>
             <label class="radio-opt"><input type="radio" name="fixMode" value="white_margins" /> Добавить белые поля</label>
-            <label class="radio-opt"><input type="radio" name="fixMode" value="mirror_bleed" /> Зеркальные вылеты</label>
+            <label class="radio-opt"><input type="radio" name="fixMode" value="mirror_bleed" checked /> Зеркальные вылеты</label>
           </div>
           <div class="legend" id="fixHint" style="margin-top:12px;font-size:0.8rem;color:var(--muted)"></div>
           <div id="fixMessages" style="margin-top:10px;font-size:0.82rem"></div>
@@ -323,7 +323,7 @@
     const btnNext = document.getElementById("btnNext");
     const errorBanner = document.getElementById("errorBanner");
 
-    let fixModeOnOpen = "stretch";
+    let fixModeOnOpen = "mirror_bleed";
     let fixPreviewAbort = null;
 
     function init() {
@@ -539,7 +539,7 @@
       fd.append("bleed_mm", order.bleedMm);
       fd.append("safe_mm", order.safeMm);
       fd.append("trim_preview_offset_mm", getTrimOffsetMm());
-      fd.append("fix_mode", "stretch");
+      fd.append("fix_mode", "mirror_bleed");
 
       document.querySelector(".wizard").classList.add("loading");
       try {
@@ -593,6 +593,9 @@
         header += `<p style="font-size:0.85rem;color:var(--muted)">Callas недоступен: проверяем боксы PDF (pikepdf). Растяжение контента — только через Callas.</p>`;
       } else {
         header += `<p style="font-size:0.85rem;color:var(--muted)">Проверка: размер TrimBox, вылеты (Bleed/Media), RGB, обработка Callas.</p>`;
+      }
+      if (data.fix_mode === "mirror_bleed") {
+        header += `<p style="font-size:0.85rem;color:var(--muted)">Вылеты: зеркалирование краёв макета (${data.order?.bleed_mm ?? 2} мм).</p>`;
       }
       el.innerHTML = header + data.pages.map(p => `
         <div class="page-card">
@@ -663,7 +666,7 @@
 
     function openFixModal(page) {
       previewPage = page;
-      fixModeOnOpen = session.fix_mode || "stretch";
+      fixModeOnOpen = session.fix_mode || "mirror_bleed";
       const radio = document.querySelector(`input[name="fixMode"][value="${fixModeOnOpen}"]`);
       if (radio) radio.checked = true;
       const p = session.pages.find(x => x.page === page);
@@ -719,7 +722,7 @@
 
     async function applyFix() {
       if (fixPreviewAbort) fixPreviewAbort.abort();
-      const mode = document.querySelector('input[name="fixMode"]:checked')?.value || "stretch";
+      const mode = document.querySelector('input[name="fixMode"]:checked')?.value || "mirror_bleed";
       closeModal("fixModal");
       fixModeOnOpen = mode;
       const fd = new FormData();

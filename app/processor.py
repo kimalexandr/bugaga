@@ -130,7 +130,7 @@ def apply_mirror_bleed_pdf(
     output_path: str,
     bleed_mm: float = 2.0,
     *,
-    dpi: int = 200,
+    dpi: int = 300,
 ) -> None:
     """Вылеты зеркалированием краёв TrimBox (растр, PyMuPDF + Pillow)."""
     import io
@@ -142,9 +142,16 @@ def apply_mirror_bleed_pdf(
         raise RuntimeError("PyMuPDF и Pillow нужны для зеркальных вылетов") from e
 
     bleed_pt = bleed_mm * MM_TO_PT
-    bleed_px = max(1, int(round(bleed_mm / 25.4 * dpi)))
     zoom = dpi / 72.0
     mat = fitz.Matrix(zoom, zoom)
+
+    def pt_to_px(pt: float) -> int:
+        return max(1, int(round(pt / 72.0 * dpi)))
+
+    def mirror_strip(strip: Image.Image, target_w: int, target_h: int, flip) -> Image.Image:
+        if strip.width != target_w or strip.height != target_h:
+            strip = strip.resize((target_w, target_h), Image.Resampling.LANCZOS)
+        return strip.transpose(flip)
 
     doc = fitz.open(input_path)
     out = fitz.open()
@@ -152,36 +159,70 @@ def apply_mirror_bleed_pdf(
     for pno in range(doc.page_count):
         src = doc[pno]
         trim = src.trimbox if src.trimbox else src.rect
+        existing = src.bleedbox if src.bleedbox else src.mediabox
+
+        left_pt = max(bleed_pt, trim.x0 - existing.x0)
+        right_pt = max(bleed_pt, existing.x1 - trim.x1)
+        bottom_pt = max(bleed_pt, trim.y0 - existing.y0)
+        top_pt = max(bleed_pt, existing.y1 - trim.y1)
         media = fitz.Rect(
-            trim.x0 - bleed_pt,
-            trim.y0 - bleed_pt,
-            trim.x1 + bleed_pt,
-            trim.y1 + bleed_pt,
+            trim.x0 - left_pt,
+            trim.y0 - bottom_pt,
+            trim.x1 + right_pt,
+            trim.y1 + top_pt,
         )
 
         pix = src.get_pixmap(matrix=mat, clip=trim, alpha=False)
         img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
         w, h = img.size
-        canvas = Image.new("RGB", (w + 2 * bleed_px, h + 2 * bleed_px), (255, 255, 255))
-        canvas.paste(img, (bleed_px, bleed_px))
+        left_px = pt_to_px(left_pt)
+        right_px = pt_to_px(right_pt)
+        bottom_px = pt_to_px(bottom_pt)
+        top_px = pt_to_px(top_pt)
 
-        top = img.crop((0, 0, w, bleed_px)).transpose(Image.FLIP_TOP_BOTTOM)
-        canvas.paste(top, (bleed_px, 0))
-        bottom = img.crop((0, h - bleed_px, w, h)).transpose(Image.FLIP_TOP_BOTTOM)
-        canvas.paste(bottom, (bleed_px, h + bleed_px))
-        left = img.crop((0, 0, bleed_px, h)).transpose(Image.FLIP_LEFT_RIGHT)
-        canvas.paste(left, (0, bleed_px))
-        right = img.crop((w - bleed_px, 0, w, h)).transpose(Image.FLIP_LEFT_RIGHT)
-        canvas.paste(right, (w + bleed_px, bleed_px))
+        canvas = Image.new(
+            "RGB",
+            (w + left_px + right_px, h + bottom_px + top_px),
+            (255, 255, 255),
+        )
+        canvas.paste(img, (left_px, bottom_px))
 
-        tl = img.crop((0, 0, bleed_px, bleed_px)).transpose(Image.ROTATE_180)
+        top_strip = mirror_strip(
+            img.crop((0, 0, w, min(h, top_px))), w, top_px, Image.FLIP_TOP_BOTTOM
+        )
+        canvas.paste(top_strip, (left_px, 0))
+        bottom_strip = mirror_strip(
+            img.crop((0, max(0, h - bottom_px), w, h)), w, bottom_px, Image.FLIP_TOP_BOTTOM
+        )
+        canvas.paste(bottom_strip, (left_px, bottom_px + h))
+        left_strip = mirror_strip(
+            img.crop((0, 0, min(left_px, w), h)), left_px, h, Image.FLIP_LEFT_RIGHT
+        )
+        canvas.paste(left_strip, (0, bottom_px))
+        right_strip = mirror_strip(
+            img.crop((max(0, w - right_px), 0, w, h)), right_px, h, Image.FLIP_LEFT_RIGHT
+        )
+        canvas.paste(right_strip, (left_px + w, bottom_px))
+
+        tl = mirror_strip(
+            img.crop((0, 0, min(left_px, w), min(top_px, h))), left_px, top_px, Image.ROTATE_180
+        )
         canvas.paste(tl, (0, 0))
-        tr = img.crop((w - bleed_px, 0, w, bleed_px)).transpose(Image.ROTATE_180)
-        canvas.paste(tr, (w + bleed_px, 0))
-        bl = img.crop((0, h - bleed_px, bleed_px, h)).transpose(Image.ROTATE_180)
-        canvas.paste(bl, (0, h + bleed_px))
-        br = img.crop((w - bleed_px, h - bleed_px, w, h)).transpose(Image.ROTATE_180)
-        canvas.paste(br, (w + bleed_px, h + bleed_px))
+        tr = mirror_strip(
+            img.crop((max(0, w - right_px), 0, w, min(top_px, h))), right_px, top_px, Image.ROTATE_180
+        )
+        canvas.paste(tr, (left_px + w, 0))
+        bl = mirror_strip(
+            img.crop((0, max(0, h - bottom_px), min(left_px, w), h)), left_px, bottom_px, Image.ROTATE_180
+        )
+        canvas.paste(bl, (0, bottom_px + h))
+        br = mirror_strip(
+            img.crop((max(0, w - right_px), max(0, h - bottom_px), w, h)),
+            right_px,
+            bottom_px,
+            Image.ROTATE_180,
+        )
+        canvas.paste(br, (left_px + w, bottom_px + h))
 
         page = out.new_page(width=media.width, height=media.height)
         page.set_mediabox(media)

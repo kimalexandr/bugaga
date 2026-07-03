@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 
 from app.callas_client import CallasClient, CallasError
 from app.processor import adjust_bleed_pdf
-from app.vizitka_service import FIX_MODES, OrderConfig, VizitkaService, TRIM_PREVIEW_OFFSET_MM
+from app.vizitka_service import FIX_MODES, OrderConfig, VizitkaService, TRIM_PREVIEW_OFFSET_MM, DEFAULT_FIX_MODE
 
 logging.basicConfig(level=logging.INFO)
 app = FastAPI(title="PDF Bleed Adjuster", version="2.0")
@@ -85,7 +85,7 @@ async def vizitka_upload(
     bleed_mm: float = Form(2.0),
     safe_mm: float = Form(2.0),
     trim_preview_offset_mm: float = Form(TRIM_PREVIEW_OFFSET_MM),
-    fix_mode: str = Form("stretch"),
+    fix_mode: str = Form(DEFAULT_FIX_MODE),
 ):
     if not _is_pdf_upload(file):
         raise HTTPException(400, "Разрешены только PDF")
