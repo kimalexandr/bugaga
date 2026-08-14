@@ -11,6 +11,7 @@ services:
       - CALLAS_CACHE_FOLDER=/var/callas-license
       - TRIM_PREVIEW_OFFSET_MM=1.0
       - VIZITKA_SESSION_DIR=/tmp/vizitka-sessions
+      - LOG_DIR=/app/logs
     volumes:
       - ./logs:/app/logs
       - /opt/pdftoolbox/callas_pdfToolboxCLI_x64_Linux_17-0-682:/opt/callas:ro

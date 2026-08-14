@@ -2,6 +2,7 @@ import base64
 import logging
 import os
 import tempfile
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
@@ -11,7 +12,39 @@ from app.callas_client import CallasClient, CallasError
 from app.processor import adjust_bleed_pdf
 from app.vizitka_service import FIX_MODES, OrderConfig, VizitkaService, TRIM_PREVIEW_OFFSET_MM, DEFAULT_FIX_MODE
 
-logging.basicConfig(level=logging.INFO)
+
+def _setup_logging() -> Path | None:
+    logging.basicConfig(level=logging.INFO)
+    log_dir = Path(os.getenv("LOG_DIR", "logs"))
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        logging.warning("не удалось создать каталог логов %s: %s", log_dir, e)
+        return None
+    path = log_dir / "web.log"
+    resolved = str(path.resolve())
+    root = logging.getLogger()
+    if any(
+        isinstance(h, RotatingFileHandler) and getattr(h, "baseFilename", "") == resolved
+        for h in root.handlers
+    ):
+        return path
+    handler = RotatingFileHandler(
+        path, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8"
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    )
+    handler.setLevel(logging.INFO)
+    root.addHandler(handler)
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        logging.getLogger(name).addHandler(handler)
+    return path
+
+
+_LOG_FILE = _setup_logging()
+logging.info("сервис запущен, лог-файл: %s", _LOG_FILE)
+
 app = FastAPI(title="PDF Bleed Adjuster", version="2.0")
 
 _STATIC = Path(__file__).resolve().parent / "static"
@@ -337,6 +370,7 @@ def health():
         "callas_cache_folder": os.getenv("CALLAS_CACHE_FOLDER") or None,
         "profiles": profiles,
         "profiles_ok": bool(profiles.get("bleed_edges") and profiles.get("cmyk")),
+        "log_file": str(_LOG_FILE) if _LOG_FILE else None,
     }
     if not callas:
         if not callas_binary.is_file():

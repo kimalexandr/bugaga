@@ -326,32 +326,39 @@
     let fixModeOnOpen = "mirror_bleed";
     let fixPreviewAbort = null;
 
+    function onEl(id, event, fn) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener(event, fn);
+    }
+
     function init() {
       renderSteps();
       initQty();
       initTurnaround();
       bindOptions();
-      btnBack.addEventListener("click", () => goStep(step - 1));
-      btnNext.addEventListener("click", onNext);
-      document.getElementById("pdfInput").addEventListener("change", onFileSelect);
-      document.getElementById("fixOk").addEventListener("click", applyFix);
-      document.getElementById("fixCancel").addEventListener("click", onFixCancel);
+      onEl("btnBack", "click", () => goStep(step - 1));
+      onEl("btnNext", "click", onNext);
+      onEl("pdfInput", "change", onFileSelect);
+      onEl("fixOk", "click", applyFix);
+      onEl("fixCancel", "click", onFixCancel);
       document.querySelectorAll('input[name="fixMode"]').forEach(r => {
         r.addEventListener("change", () => {
-          if (document.getElementById("fixModal").classList.contains("open")) {
+          const modal = document.getElementById("fixModal");
+          if (modal && modal.classList.contains("open")) {
             previewFixMode(r.value);
           }
         });
       });
-      document.getElementById("consentAgree").addEventListener("click", onConsentAgree);
-      document.getElementById("consentStay").addEventListener("click", () => closeModal("consentModal"));
-      document.getElementById("markupPreview").addEventListener("click", flipPreview);
-      document.getElementById("plainPreview").addEventListener("click", flipPreview);
-      document.getElementById("approveCheck").addEventListener("change", onApprove);
-      document.getElementById("btnDownload").addEventListener("click", downloadPdf);
-      document.getElementById("btnRefreshMarkup").addEventListener("click", applyPreviewSettings);
-      document.getElementById("trimOffsetInput").addEventListener("change", syncTrimOffsetFromStep2);
-      document.getElementById("trimOffsetStep4").addEventListener("change", syncTrimOffsetFromStep4);
+      onEl("consentAgree", "click", onConsentAgree);
+      onEl("consentStay", "click", () => closeModal("consentModal"));
+      onEl("markupPreview", "click", flipPreview);
+      onEl("plainPreview", "click", flipPreview);
+      onEl("approveCheck", "change", onApprove);
+      onEl("btnDownload", "click", downloadPdf);
+      onEl("btnRefreshMarkup", "click", applyPreviewSettings);
+      onEl("trimOffsetInput", "change", syncTrimOffsetFromStep2);
+      onEl("trimOffsetStep4", "change", syncTrimOffsetFromStep4);
       updateOrderSummary();
     }
 
@@ -827,7 +834,15 @@
       window.open(`/api/vizitka/${session.session_id}/download`, "_blank");
     }
 
-    init();
+    try {
+      init();
+    } catch (err) {
+      console.error(err);
+      if (errorBanner) {
+        errorBanner.textContent = "Ошибка загрузки страницы: " + (err && err.message ? err.message : String(err));
+        errorBanner.classList.remove("hidden");
+      }
+    }
   </script>
 </body>
 </html>
