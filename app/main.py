@@ -6,7 +6,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from app.callas_client import CallasClient, CallasError
 from app.processor import adjust_bleed_pdf
@@ -37,8 +37,6 @@ def _setup_logging() -> Path | None:
     )
     handler.setLevel(logging.INFO)
     root.addHandler(handler)
-    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
-        logging.getLogger(name).addHandler(handler)
     return path
 
 
@@ -80,20 +78,32 @@ def _unlink_safe(path: str | None) -> None:
         Path(path).unlink(missing_ok=True)
 
 
+def _html_response(path: Path) -> FileResponse:
+    if not path.is_file():
+        raise HTTPException(404, f"{path.name} не найден")
+    return FileResponse(
+        path,
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
+
+
 @app.get("/")
 async def vizitka_page():
+    return _html_response(_STATIC / "vizitka.html")
+
+
+@app.head("/")
+async def vizitka_page_head():
     page = _STATIC / "vizitka.html"
     if not page.is_file():
         raise HTTPException(404, "vizitka.html не найден")
-    return FileResponse(page, media_type="text/html; charset=utf-8")
+    return Response(headers={"Cache-Control": "no-cache, must-revalidate"})
 
 
 @app.get("/bleed")
 async def bleed_page():
-    page = _STATIC / "index.html"
-    if not page.is_file():
-        raise HTTPException(404, "index.html не найден")
-    return FileResponse(page, media_type="text/html; charset=utf-8")
+    return _html_response(_STATIC / "index.html")
 
 
 def _is_pdf_upload(file: UploadFile) -> bool:

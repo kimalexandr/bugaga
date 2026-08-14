@@ -2,6 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Визитки — заказ</title>
   <style>
@@ -130,7 +131,16 @@
   </style>
 </head>
 <body>
-  <div class="top"><a href="/bleed">Инструмент вылетов</a> · <a href="/docs">API</a></div>
+  <noscript>
+    <div style="padding:24px;font-family:sans-serif;max-width:640px;margin:0 auto">
+      <h1>Визитки — заказ</h1>
+      <p>Для работы визарда нужен JavaScript. Откройте страницу в Chrome или Edge.</p>
+    </div>
+  </noscript>
+  <div id="bootFallback" style="padding:24px;text-align:center;color:#777;font-family:sans-serif">
+    Загрузка визарда…
+  </div>
+  <div class="top"><a href="/bleed">Инструмент вылетов</a> · <a href="/docs">API</a> · <a href="/health">health</a></div>
   <div class="wizard">
     <div class="steps" id="stepsBar"></div>
     <div class="nav-row">
@@ -332,6 +342,23 @@
       el.addEventListener(event, fn);
     }
 
+    function bootOk() {
+      const fb = document.getElementById("bootFallback");
+      if (fb) fb.style.display = "none";
+    }
+
+    function bootFail(msg) {
+      const fb = document.getElementById("bootFallback");
+      if (fb) {
+        fb.style.color = "#c62828";
+        fb.textContent = msg;
+      }
+      if (errorBanner) {
+        errorBanner.textContent = msg;
+        errorBanner.classList.remove("hidden");
+      }
+    }
+
     function init() {
       renderSteps();
       initQty();
@@ -360,6 +387,7 @@
       onEl("trimOffsetInput", "change", syncTrimOffsetFromStep2);
       onEl("trimOffsetStep4", "change", syncTrimOffsetFromStep4);
       updateOrderSummary();
+      bootOk();
     }
 
     function getTrimOffsetMm() {
@@ -393,6 +421,7 @@
     }
 
     function renderSteps() {
+      if (!stepsBar || !btnBack || !btnNext) return;
       stepsBar.innerHTML = STEP_LABELS.map((label, i) => {
         const n = i + 1;
         const cls = n < step ? "done" : n === step ? "active" : "";
@@ -834,14 +863,23 @@
       window.open(`/api/vizitka/${session.session_id}/download`, "_blank");
     }
 
-    try {
-      init();
-    } catch (err) {
-      console.error(err);
-      if (errorBanner) {
-        errorBanner.textContent = "Ошибка загрузки страницы: " + (err && err.message ? err.message : String(err));
-        errorBanner.classList.remove("hidden");
+    window.addEventListener("error", (ev) => {
+      bootFail("Ошибка на странице: " + (ev.message || "неизвестная"));
+    });
+
+    function startApp() {
+      try {
+        init();
+      } catch (err) {
+        console.error(err);
+        bootFail("Ошибка загрузки: " + (err && err.message ? err.message : String(err)));
       }
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", startApp);
+    } else {
+      startApp();
     }
   </script>
 </body>
